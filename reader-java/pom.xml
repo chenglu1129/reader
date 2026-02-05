@@ -120,6 +120,13 @@
             <version>1.0.2</version>
         </dependency>
 
+        <!-- WebDAV客户端 Sardine -->
+        <dependency>
+            <groupId>com.github.lookfirst</groupId>
+            <artifactId>sardine</artifactId>
+            <version>5.12</version>
+        </dependency>
+
         <!-- Spring Boot Starter Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
