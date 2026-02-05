@@ -200,6 +200,113 @@ public class BookService {
     }
 
     /**
+     * 搜索书籍
+     * TODO: 实现完整的书源搜索逻辑
+     */
+    public List<Book> searchBooks(String keyword, String sourceUrl, int page, String username) {
+        List<Book> results = new ArrayList<>();
+
+        // 目前返回本地书架中匹配关键词的书籍
+        // 后续需要实现通过书源在线搜索
+        List<Book> shelfBooks = getShelfBookList(username);
+
+        for (Book book : shelfBooks) {
+            if (matchesKeyword(book, keyword)) {
+                results.add(book);
+            }
+        }
+
+        log.info("搜索书籍: keyword={}, sourceUrl={}, 结果数={}", keyword, sourceUrl, results.size());
+        return results;
+    }
+
+    /**
+     * 获取书籍信息
+     */
+    public Book getBookInfo(String bookUrl, String sourceUrl, String username) {
+        // 先从本地书架查找
+        Book book = getShelfBookByURL(bookUrl, username);
+        if (book != null) {
+            return book;
+        }
+
+        // TODO: 如果本地没有，通过书源获取
+        log.info("获取书籍信息: bookUrl={}, sourceUrl={}", bookUrl, sourceUrl);
+        return null;
+    }
+
+    /**
+     * 获取章节内容
+     */
+    public String getChapterContent(String bookUrl, int chapterIndex, String username) {
+        // 先从缓存获取
+        String content = getCachedContent(bookUrl, chapterIndex, username);
+        if (content != null && !content.isEmpty()) {
+            return content;
+        }
+
+        // TODO: 通过书源获取章节内容
+        log.info("获取章节内容: bookUrl={}, chapterIndex={}", bookUrl, chapterIndex);
+        return "章节内容加载中...（功能待完善）";
+    }
+
+    /**
+     * 刷新章节列表
+     */
+    public List<BookChapter> refreshChapterList(String bookUrl, String username) {
+        // TODO: 通过书源刷新章节列表
+        log.info("刷新章节列表: bookUrl={}", bookUrl);
+
+        // 暂时返回本地缓存的章节列表
+        return getChapterList(bookUrl, username);
+    }
+
+    /**
+     * 判断书籍是否匹配关键词
+     */
+    private boolean matchesKeyword(Book book, String keyword) {
+        if (keyword == null || keyword.isEmpty()) {
+            return true;
+        }
+        String lowerKeyword = keyword.toLowerCase();
+
+        if (book.getName() != null && book.getName().toLowerCase().contains(lowerKeyword)) {
+            return true;
+        }
+        if (book.getAuthor() != null && book.getAuthor().toLowerCase().contains(lowerKeyword)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 获取缓存的章节内容
+     */
+    private String getCachedContent(String bookUrl, int chapterIndex, String username) {
+        String bookDir = getBookDir(bookUrl, username);
+        File contentFile = new File(bookDir, "content_" + chapterIndex + ".txt");
+
+        if (contentFile.exists()) {
+            return storageHelper.readFile(contentFile.getAbsolutePath());
+        }
+        return null;
+    }
+
+    /**
+     * 保存章节内容到缓存
+     */
+    public boolean saveChapterContent(String bookUrl, int chapterIndex, String content, String username) {
+        String bookDir = getBookDir(bookUrl, username);
+        File dir = new File(bookDir);
+        if (!dir.exists()) {
+            dir.mkdirs();
+        }
+
+        File contentFile = new File(dir, "content_" + chapterIndex + ".txt");
+        return storageHelper.writeFile(contentFile.getAbsolutePath(), content);
+    }
+
+    /**
      * 获取书架路径
      */
     private String getShelfPath(String username) {

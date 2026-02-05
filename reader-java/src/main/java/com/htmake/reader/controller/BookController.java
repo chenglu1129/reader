@@ -123,4 +123,89 @@ public class BookController {
             return ReturnData.error("保存阅读进度失败: " + e.getMessage());
         }
     }
+
+    /**
+     * 搜索书籍
+     */
+    @GetMapping("/searchBook")
+    public ReturnData searchBook(@RequestParam("key") String keyword,
+            @RequestParam(value = "sourceUrl", required = false) String sourceUrl,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            if (keyword == null || keyword.isEmpty()) {
+                return ReturnData.error("关键词不能为空");
+            }
+
+            // 调用搜索服务
+            var result = bookService.searchBooks(keyword, sourceUrl, page, username);
+            return ReturnData.success(result);
+        } catch (Exception e) {
+            log.error("搜索书籍失败", e);
+            return ReturnData.error("搜索书籍失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取书籍信息
+     */
+    @GetMapping("/getBookInfo")
+    public ReturnData getBookInfo(@RequestParam("bookUrl") String bookUrl,
+            @RequestParam(value = "sourceUrl", required = false) String sourceUrl,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            if (bookUrl == null || bookUrl.isEmpty()) {
+                return ReturnData.error("书籍URL不能为空");
+            }
+
+            Book book = bookService.getBookInfo(bookUrl, sourceUrl, username);
+            if (book != null) {
+                return ReturnData.success(book);
+            } else {
+                return ReturnData.error("获取书籍信息失败");
+            }
+        } catch (Exception e) {
+            log.error("获取书籍信息失败", e);
+            return ReturnData.error("获取书籍信息失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取章节内容
+     */
+    @GetMapping("/getBookContent")
+    public ReturnData getBookContent(@RequestParam("bookUrl") String bookUrl,
+            @RequestParam("chapterIndex") int chapterIndex,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            if (bookUrl == null || bookUrl.isEmpty()) {
+                return ReturnData.error("书籍URL不能为空");
+            }
+
+            String content = bookService.getChapterContent(bookUrl, chapterIndex, username);
+            return ReturnData.success(content);
+        } catch (Exception e) {
+            log.error("获取章节内容失败", e);
+            return ReturnData.error("获取章节内容失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 刷新章节列表
+     */
+    @PostMapping("/refreshChapterList")
+    public ReturnData refreshChapterList(@RequestParam("bookUrl") String bookUrl,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            if (bookUrl == null || bookUrl.isEmpty()) {
+                return ReturnData.error("书籍URL不能为空");
+            }
+
+            List<BookChapter> chapters = bookService.refreshChapterList(bookUrl, username);
+            return ReturnData.success(chapters);
+        } catch (Exception e) {
+            log.error("刷新章节列表失败", e);
+            return ReturnData.error("刷新章节列表失败: " + e.getMessage());
+        }
+    }
 }
