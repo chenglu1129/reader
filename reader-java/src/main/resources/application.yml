@@ -1,0 +1,82 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+spring:
+  application:
+    name: reader
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+      enabled: true
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+    time-zone: GMT+8
+
+# 阅读器应用配置
+reader:
+  app:
+    # 工作目录
+    work-dir: ""
+    # 存储路径
+    storage-path: storage
+    # 是否需要登录鉴权，开启后将支持多用户模式
+    secure: false
+    # 注册邀请码，为空时则开放注册，否则注册时需要输入邀请码
+    invite-code: ""
+    # 管理密码，开启鉴权时，前端管理用户空间的管理密码
+    secure-key: ""
+    # 是否缓存章节内容
+    cache-chapter-content: false
+    # 是否打开调试日志
+    debug-log: false
+    # 是否自动清理不活跃用户，为0不清理，大于0为清理超过指定天数未登录的用户
+    auto-clear-inactive-user: 0
+    # MongoDB URI 用于备份数据
+    mongo-uri: ""
+    # MongoDB 数据库名称
+    mongo-db-name: reader
+    # 书架自动更新间隔时间，单位分钟，必须是10的倍数
+    shelf-update-interval: 10
+    # 用户上限，最大 15
+    user-limit: 15
+    # remote-webview 地址
+    remote-webview-api: ""
+    # 新用户是否默认启用webdav
+    default-user-enable-webdav: true
+    # 新用户是否默认启用localStore
+    default-user-enable-local-store: true
+    # 新用户是否默认可编辑书源
+    default-user-enable-book-source: true
+    # 新用户是否默认可编辑RSS源
+    default-user-enable-rss-source: true
+    # 新用户默认书源上限
+    default-user-book-source-limit: 100
+    # 新用户默认书籍上限
+    default-user-book-limit: 200
+    # 是否自动备份用户数据
+    auto-backup-user-data: false
+    # 用户密码最小长度
+    min-user-password-length: 8
+    # 远程书源定时更新间隔时间，单位分钟
+    remote-book-source-update-interval: 720
+
+  server:
+    # Web链接
+    web-url: http://localhost:${server.port}
+
+# 日志配置
+logging:
+  level:
+    root: INFO
+    com.htmake.reader: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
