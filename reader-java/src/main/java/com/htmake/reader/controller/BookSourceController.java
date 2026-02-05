@@ -7,7 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 书源管理Controller
@@ -23,14 +26,79 @@ public class BookSourceController {
     /**
      * 获取所有书源
      */
-    @GetMapping("/getBookSources")
-    public ReturnData getBookSources(@RequestParam(value = "username", defaultValue = "default") String username) {
+    @RequestMapping(value = "/getBookSources", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getBookSources(@RequestParam(value = "simple", required = false) Integer simple,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
         try {
+            int finalSimple = simple != null ? simple : 0;
+            if (body != null && body.get("simple") != null) {
+                Object v = body.get("simple");
+                if (v instanceof Number) {
+                    finalSimple = ((Number) v).intValue();
+                } else {
+                    try {
+                        finalSimple = Integer.parseInt(String.valueOf(v));
+                    } catch (Exception ignore) {
+                        finalSimple = 0;
+                    }
+                }
+            }
+
             List<BookSource> sources = bookSourceService.getAllBookSources(username);
+            if (finalSimple > 0) {
+                List<Map<String, Object>> list = new ArrayList<>();
+                for (BookSource source : sources) {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("bookSourceGroup", source.getBookSourceGroup());
+                    item.put("bookSourceName", source.getBookSourceName());
+                    item.put("bookSourceUrl", source.getBookSourceUrl());
+                    item.put("exploreUrl", source.getExploreUrl());
+                    list.add(item);
+                }
+                return ReturnData.success(list);
+            }
+
             return ReturnData.success(sources);
         } catch (Exception e) {
             log.error("获取书源列表失败", e);
             return ReturnData.error("获取书源列表失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getBookSource", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getBookSource(@RequestParam(value = "bookSourceUrl", required = false) String bookSourceUrl,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            String finalUrl = bookSourceUrl;
+            if ((finalUrl == null || finalUrl.isEmpty()) && body != null && body.get("bookSourceUrl") != null) {
+                finalUrl = String.valueOf(body.get("bookSourceUrl"));
+            }
+
+            if (finalUrl == null || finalUrl.isEmpty()) {
+                return ReturnData.error("书源链接不能为空");
+            }
+
+            BookSource source = bookSourceService.getBookSourceByUrl(finalUrl, username);
+            if (source == null) {
+                return ReturnData.error("书源信息不存在");
+            }
+
+            return ReturnData.success(source);
+        } catch (Exception e) {
+            log.error("获取书源失败", e);
+            return ReturnData.error("获取书源失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getInvalidBookSources", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getInvalidBookSources(@RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            return ReturnData.success(bookSourceService.getInvalidBookSources(username));
+        } catch (Exception e) {
+            log.error("获取失效书源失败", e);
+            return ReturnData.error("获取失效书源失败: " + e.getMessage());
         }
     }
 
@@ -116,6 +184,48 @@ public class BookSourceController {
         } catch (Exception e) {
             log.error("删除书源失败", e);
             return ReturnData.error("删除书源失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 批量删除书源
+     */
+    @PostMapping("/deleteBookSources")
+    public ReturnData deleteBookSources(@RequestBody List<String> sourceUrls,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            if (sourceUrls == null || sourceUrls.isEmpty()) {
+                return ReturnData.error("书源URL列表不能为空");
+            }
+
+            boolean success = bookSourceService.deleteBookSources(sourceUrls, username);
+            if (success) {
+                return ReturnData.success("删除成功");
+            } else {
+                return ReturnData.error("删除失败");
+            }
+        } catch (Exception e) {
+            log.error("批量删除书源失败", e);
+            return ReturnData.error("批量删除书源失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 删除所有书源
+     */
+    @PostMapping("/deleteAllBookSources")
+    public ReturnData deleteAllBookSources(
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            boolean success = bookSourceService.deleteAllBookSources(username);
+            if (success) {
+                return ReturnData.success("删除成功");
+            } else {
+                return ReturnData.error("删除失败");
+            }
+        } catch (Exception e) {
+            log.error("删除所有书源失败", e);
+            return ReturnData.error("删除所有书源失败: " + e.getMessage());
         }
     }
 }

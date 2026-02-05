@@ -38,4 +38,14 @@ class AnalyzeUrlTest {
         AnalyzeUrl analyzeUrl = new AnalyzeUrl("https://example.com/api @Method:POST,{\"key\":\"value\"}");
         assertEquals("POST", analyzeUrl.getMethod());
     }
+
+    @Test
+    void testNormalizeRelativeUrl() {
+        assertEquals("http://www.bqgu.cc/category/tongren/1.html",
+                HttpUtils.normalizeUrl("http://www.bqgu.cc", "/category/tongren/1.html"));
+        assertEquals("http://www.bqgu.cc/category/tongren/1.html",
+                HttpUtils.normalizeUrl("`http://www.bqgu.cc`", "/category/tongren/1.html"));
+        assertEquals("https://a.example/path",
+                HttpUtils.normalizeUrl("https://base.example/x", "//a.example/path"));
+    }
 }

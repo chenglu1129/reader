@@ -231,11 +231,11 @@ public class BookService {
     /**
      * 发现书籍 (探索)
      */
-    public List<Book> exploreBooks(String url, int page, String sourceUrl, String username) {
+    public List<Book> exploreBooks(String url, int page, String bookSourceUrl, String username) {
         try {
-            BookSource source = bookSourceService.getBookSourceByUrl(sourceUrl, username);
+            BookSource source = bookSourceService.getBookSourceByUrl(bookSourceUrl, username);
             if (source == null) {
-                log.warn("发现书籍失败: 找不到书源 {}", sourceUrl);
+                log.warn("发现书籍失败: 找不到书源 {}", bookSourceUrl);
                 return new ArrayList<>();
             }
 
@@ -246,7 +246,7 @@ public class BookService {
             }
             return results;
         } catch (Exception e) {
-            log.error("发现书籍失败: url={}, sourceUrl={}", url, sourceUrl, e);
+            log.error("发现书籍失败: url={}, sourceUrl={}", url, bookSourceUrl, e);
             return new ArrayList<>();
         }
     }

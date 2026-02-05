@@ -12,6 +12,7 @@ import java.io.File;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -56,14 +57,14 @@ public class BookSourceService {
     /**
      * 根据URL获取书源
      */
-    public BookSource getBookSourceByUrl(String sourceUrl, String username) {
-        if (sourceUrl == null || sourceUrl.isEmpty()) {
+    public BookSource getBookSourceByUrl(String bookSourceUrl, String username) {
+        if (bookSourceUrl == null || bookSourceUrl.isEmpty()) {
             return null;
         }
 
         List<BookSource> sources = getAllBookSources(username);
         return sources.stream()
-                .filter(source -> sourceUrl.equals(source.getBookSourceUrl()))
+                .filter(source -> bookSourceUrl.equals(source.getBookSourceUrl()))
                 .findFirst()
                 .orElse(null);
     }
@@ -199,5 +200,49 @@ public class BookSourceService {
      */
     private String getBookSourcePath(String username) {
         return storageHelper.getUserDataPath(username) + File.separator + "bookSource.json";
+    }
+
+    /**
+     * 删除所有书源
+     */
+    public boolean deleteAllBookSources(String username) {
+        return saveAllBookSources(new ArrayList<>(), username);
+    }
+
+    public List<Map<String, Object>> getInvalidBookSources(String username) {
+        try {
+            String cacheDirPath = storageHelper.getCachePath() + File.separator + "invalidBookSourceCache"
+                    + File.separator + username;
+            File cacheDir = new File(cacheDirPath);
+            File[] files = cacheDir.listFiles();
+            if (files == null || files.length == 0) {
+                return new ArrayList<>();
+            }
+
+            Type mapType = new TypeToken<Map<String, Object>>() {
+            }.getType();
+            List<Map<String, Object>> list = new ArrayList<>();
+            for (File f : files) {
+                if (f == null || !f.isFile()) {
+                    continue;
+                }
+                String json = storageHelper.readFile(f.getAbsolutePath());
+                if (json == null || json.isEmpty()) {
+                    continue;
+                }
+                try {
+                    Map<String, Object> info = GSON.fromJson(json, mapType);
+                    if (info != null && !info.isEmpty()) {
+                        list.add(info);
+                    }
+                } catch (Exception ignore) {
+                    continue;
+                }
+            }
+            return list;
+        } catch (Exception e) {
+            log.error("获取失效书源列表失败", e);
+            return new ArrayList<>();
+        }
     }
 }

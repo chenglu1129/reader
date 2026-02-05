@@ -154,7 +154,7 @@ public class BookController {
     public ReturnData exploreBook(@RequestParam(value = "ruleFindUrl", required = false) String ruleFindUrl,
             @RequestBody(required = false) Map<String, Object> body,
             @RequestParam(value = "page", defaultValue = "1") int page,
-            @RequestParam(value = "sourceUrl", required = false) String sourceUrl,
+            @RequestParam(value = "bookSourceUrl", required = false) String sourceUrl,
             @RequestParam(value = "username", defaultValue = "default") String username) {
         try {
             String finalUrl = ruleFindUrl;
@@ -175,8 +175,8 @@ public class BookController {
 
             // 获取书源URL，如果参数中没有，尝试从body获取 (适配不同前端调用方式)
             String finalSourceUrl = sourceUrl;
-            if (finalSourceUrl == null && body != null && body.containsKey("sourceUrl")) {
-                finalSourceUrl = (String) body.get("sourceUrl");
+            if (finalSourceUrl == null && body != null && body.containsKey("bookSourceUrl")) {
+                finalSourceUrl = (String) body.get("bookSourceUrl");
             }
 
             // 如果还是没有sourceUrl，可能在accessToken里或者其他地方，但通常发现请求会带sourceUrl

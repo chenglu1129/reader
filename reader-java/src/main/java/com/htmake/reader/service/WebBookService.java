@@ -49,7 +49,7 @@ public class WebBookService {
 
         // 解析URL
         AnalyzeUrl analyzeUrl = new AnalyzeUrl(url, variables);
-        String exploreUrl = analyzeUrl.getUrl();
+        String exploreUrl = HttpUtils.normalizeUrl(bookSource.getBookSourceUrl(), analyzeUrl.getUrl());
 
         log.info("发现书籍: {} - {}", bookSource.getBookSourceName(), exploreUrl);
 
@@ -86,7 +86,7 @@ public class WebBookService {
 
         // 解析URL
         AnalyzeUrl analyzeUrl = new AnalyzeUrl(bookSource.getSearchUrl(), variables);
-        String searchUrl = analyzeUrl.getUrl();
+        String searchUrl = HttpUtils.normalizeUrl(bookSource.getBookSourceUrl(), analyzeUrl.getUrl());
 
         log.info("搜索书籍: {} - {}", bookSource.getBookSourceName(), searchUrl);
 

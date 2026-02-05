@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -146,10 +147,67 @@ public class HttpUtils {
         return client;
     }
 
+    public static String normalizeUrl(String baseUrl, String url) {
+        if (url == null) {
+            return null;
+        }
+
+        String u = stripUrlWrappers(url);
+        if (u.isEmpty()) {
+            return u;
+        }
+
+        if (u.matches("(?i)^[a-z][a-z0-9+.-]*:.*")) {
+            return u;
+        }
+
+        String b = stripUrlWrappers(baseUrl);
+        if (u.startsWith("//")) {
+            String scheme = "http";
+            if (b != null && !b.isEmpty()) {
+                int idx = b.indexOf(':');
+                if (idx > 0) {
+                    scheme = b.substring(0, idx);
+                }
+            }
+            return scheme + ":" + u;
+        }
+
+        if (b == null || b.isEmpty()) {
+            return u;
+        }
+
+        if (!b.matches("(?i)^[a-z][a-z0-9+.-]*:.*")) {
+            b = "https://" + b;
+        }
+
+        try {
+            URI base = URI.create(b);
+            return base.resolve(u).toString();
+        } catch (Exception e) {
+            return u;
+        }
+    }
+
     /**
      * 设置自定义OkHttpClient
      */
     public static void setClient(OkHttpClient customClient) {
         client = customClient;
+    }
+
+    private static String stripUrlWrappers(String s) {
+        if (s == null) {
+            return null;
+        }
+        String t = s.trim().replace("`", "");
+        if (t.length() >= 2) {
+            char first = t.charAt(0);
+            char last = t.charAt(t.length() - 1);
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                t = t.substring(1, t.length() - 1).trim();
+            }
+        }
+        return t;
     }
 }
