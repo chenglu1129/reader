@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.htmake.reader.config.ReaderConfig;
 import com.htmake.reader.entity.Book;
 import com.htmake.reader.entity.BookChapter;
+import com.htmake.reader.entity.BookSource;
+import com.htmake.reader.entity.SearchBook;
 import com.htmake.reader.utils.MD5Utils;
 import com.htmake.reader.utils.StorageHelper;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,12 @@ public class BookService {
 
     @Autowired
     private ReaderConfig readerConfig;
+
+    @Autowired
+    private BookSourceService bookSourceService;
+
+    @Autowired
+    private WebBookService webBookService;
 
     /**
      * 获取书架列表
@@ -218,6 +226,29 @@ public class BookService {
 
         log.info("搜索书籍: keyword={}, sourceUrl={}, 结果数={}", keyword, sourceUrl, results.size());
         return results;
+    }
+
+    /**
+     * 发现书籍 (探索)
+     */
+    public List<Book> exploreBooks(String url, int page, String sourceUrl, String username) {
+        try {
+            BookSource source = bookSourceService.getBookSourceByUrl(sourceUrl, username);
+            if (source == null) {
+                log.warn("发现书籍失败: 找不到书源 {}", sourceUrl);
+                return new ArrayList<>();
+            }
+
+            var searchBooks = webBookService.exploreBook(source, url, page);
+            List<Book> results = new ArrayList<>();
+            for (var sb : searchBooks) {
+                results.add(sb.toBook());
+            }
+            return results;
+        } catch (Exception e) {
+            log.error("发现书籍失败: url={}, sourceUrl={}", url, sourceUrl, e);
+            return new ArrayList<>();
+        }
     }
 
     /**

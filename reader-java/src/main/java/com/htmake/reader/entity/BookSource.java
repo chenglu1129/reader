@@ -1,6 +1,7 @@
 package com.htmake.reader.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.htmake.reader.entity.rule.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -60,22 +61,22 @@ public class BookSource {
     private String exploreUrl;
 
     /** 发现规则 */
-    private String ruleExplore;
+    private Object ruleExplore;
 
     /** 搜索URL */
     private String searchUrl;
 
     /** 搜索规则 */
-    private String ruleSearch;
+    private Object ruleSearch;
 
     /** 书籍信息规则 */
-    private String ruleBookInfo;
+    private Object ruleBookInfo;
 
     /** 目录规则 */
-    private String ruleToc;
+    private Object ruleToc;
 
     /** 正文规则 */
-    private String ruleContent;
+    private Object ruleContent;
 
     /** 书源注释 */
     private String bookSourceComment;
@@ -101,6 +102,61 @@ public class BookSource {
 
     @Override
     public int hashCode() {
-        return bookSourceUrl.hashCode();
+        return bookSourceUrl != null ? bookSourceUrl.hashCode() : 0;
+    }
+
+    // 手动实现规则获取，处理多种类型 (Object, String, Array)
+    public com.htmake.reader.entity.rule.ExploreRule getRuleExplore() {
+        return convertRule(ruleExplore, com.htmake.reader.entity.rule.ExploreRule.class);
+    }
+
+    public com.htmake.reader.entity.rule.SearchRule getRuleSearch() {
+        return convertRule(ruleSearch, com.htmake.reader.entity.rule.SearchRule.class);
+    }
+
+    public com.htmake.reader.entity.rule.BookInfoRule getRuleBookInfo() {
+        return convertRule(ruleBookInfo, com.htmake.reader.entity.rule.BookInfoRule.class);
+    }
+
+    public com.htmake.reader.entity.rule.TocRule getRuleToc() {
+        return convertRule(ruleToc, com.htmake.reader.entity.rule.TocRule.class);
+    }
+
+    public com.htmake.reader.entity.rule.ContentRule getRuleContent() {
+        return convertRule(ruleContent, com.htmake.reader.entity.rule.ContentRule.class);
+    }
+
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+
+    private <T> T convertRule(Object rule, Class<T> clazz) {
+        if (rule == null)
+            return null;
+        try {
+            if (clazz.isInstance(rule)) {
+                return clazz.cast(rule);
+            }
+            String json;
+            if (rule instanceof String) {
+                json = (String) rule;
+            } else if (rule instanceof java.util.Collection) {
+                // 如果是数组，尝试取第一个元素 (应对前端发送数组的情况)
+                java.util.Collection<?> col = (java.util.Collection<?>) rule;
+                if (col.isEmpty())
+                    return null;
+                Object first = col.iterator().next();
+                if (clazz.isInstance(first))
+                    return clazz.cast(first);
+                json = GSON.toJson(first);
+            } else {
+                json = GSON.toJson(rule);
+            }
+
+            if (json == null || json.trim().isEmpty() || "{}".equals(json.trim()) || "[]".equals(json.trim())) {
+                return null;
+            }
+            return GSON.fromJson(json, clazz);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

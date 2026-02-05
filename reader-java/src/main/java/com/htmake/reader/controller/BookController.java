@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 书籍管理Controller
@@ -143,6 +144,49 @@ public class BookController {
         } catch (Exception e) {
             log.error("搜索书籍失败", e);
             return ReturnData.error("搜索书籍失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 发现书籍 (探索)
+     */
+    @RequestMapping(value = "/exploreBook", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData exploreBook(@RequestParam(value = "ruleFindUrl", required = false) String ruleFindUrl,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "sourceUrl", required = false) String sourceUrl,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            String finalUrl = ruleFindUrl;
+            int finalPage = page;
+
+            if (body != null) {
+                if (body.containsKey("ruleFindUrl")) {
+                    finalUrl = (String) body.get("ruleFindUrl");
+                }
+                if (body.containsKey("page")) {
+                    finalPage = (Integer) body.get("page");
+                }
+            }
+
+            if (finalUrl == null || finalUrl.isEmpty()) {
+                return ReturnData.error("链接不能为空");
+            }
+
+            // 获取书源URL，如果参数中没有，尝试从body获取 (适配不同前端调用方式)
+            String finalSourceUrl = sourceUrl;
+            if (finalSourceUrl == null && body != null && body.containsKey("sourceUrl")) {
+                finalSourceUrl = (String) body.get("sourceUrl");
+            }
+
+            // 如果还是没有sourceUrl，可能在accessToken里或者其他地方，但通常发现请求会带sourceUrl
+            // 在Legado中，如果是发现页面，通常会先选择书源
+
+            var result = bookService.exploreBooks(finalUrl, finalPage, finalSourceUrl, username);
+            return ReturnData.success(result);
+        } catch (Exception e) {
+            log.error("发现书籍失败", e);
+            return ReturnData.error("发现书籍失败: " + e.getMessage());
         }
     }
 

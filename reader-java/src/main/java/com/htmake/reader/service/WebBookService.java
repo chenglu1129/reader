@@ -34,6 +34,41 @@ public class WebBookService {
     private static final Gson GSON = new Gson();
 
     /**
+     * 发现书籍
+     */
+    public List<SearchBook> exploreBook(BookSource bookSource, String url, int page) throws IOException {
+        List<SearchBook> searchBooks = new ArrayList<>();
+
+        if (bookSource == null || url == null || url.isEmpty()) {
+            throw new IllegalArgumentException("书源或发现URL为空");
+        }
+
+        // 构建变量映射
+        Map<String, String> variables = new HashMap<>();
+        variables.put("page", String.valueOf(page));
+
+        // 解析URL
+        AnalyzeUrl analyzeUrl = new AnalyzeUrl(url, variables);
+        String exploreUrl = analyzeUrl.getUrl();
+
+        log.info("发现书籍: {} - {}", bookSource.getBookSourceName(), exploreUrl);
+
+        // 发送HTTP请求
+        String response;
+        if ("POST".equals(analyzeUrl.getMethod())) {
+            response = HttpUtils.postJson(exploreUrl, analyzeUrl.getBody(), analyzeUrl.getHeaders());
+        } else {
+            response = HttpUtils.get(exploreUrl, analyzeUrl.getHeaders());
+        }
+
+        // 解析发现结果
+        searchBooks = parseSearchResult(response, bookSource);
+
+        log.info("发现完成: {} 结果数={}", bookSource.getBookSourceName(), searchBooks.size());
+        return searchBooks;
+    }
+
+    /**
      * 搜索书籍
      */
     public List<SearchBook> searchBook(BookSource bookSource, String keyword, int page) throws IOException {
@@ -77,19 +112,9 @@ public class WebBookService {
         List<SearchBook> searchBooks = new ArrayList<>();
 
         try {
-            String ruleSearch = bookSource.getRuleSearch();
-            if (ruleSearch == null || ruleSearch.isEmpty()) {
-                log.warn("书源搜索规则为空");
-                return searchBooks;
-            }
-
-            // 解析规则JSON
-            JsonObject rules = JsonParser.parseString(ruleSearch).getAsJsonObject();
-
-            // 获取书籍列表规则
-            String bookListRule = getJsonString(rules, "bookList");
-            if (bookListRule == null || bookListRule.isEmpty()) {
-                log.warn("书籍列表规则为空");
+            var rules = bookSource.getRuleSearch();
+            if (rules == null || rules.getBookList() == null || rules.getBookList().isEmpty()) {
+                log.warn("书源搜索规则或书籍列表规则为空");
                 return searchBooks;
             }
 
@@ -114,12 +139,13 @@ public class WebBookService {
     /**
      * 解析HTML搜索结果
      */
-    private List<SearchBook> parseHtmlSearchResult(String html, JsonObject rules, BookSource bookSource) {
+    private List<SearchBook> parseHtmlSearchResult(String html, com.htmake.reader.entity.rule.SearchRule rules,
+            BookSource bookSource) {
         List<SearchBook> searchBooks = new ArrayList<>();
 
         try {
             Document doc = Jsoup.parse(html);
-            String bookListRule = getJsonString(rules, "bookList");
+            String bookListRule = rules.getBookList();
 
             Elements bookElements = doc.select(bookListRule);
 
@@ -130,27 +156,27 @@ public class WebBookService {
                 searchBook.setType(bookSource.getBookSourceType());
 
                 // 解析各字段
-                String nameRule = getJsonString(rules, "name");
+                String nameRule = rules.getName();
                 if (nameRule != null) {
                     searchBook.setName(parseElementRule(bookElement, nameRule));
                 }
 
-                String authorRule = getJsonString(rules, "author");
+                String authorRule = rules.getAuthor();
                 if (authorRule != null) {
                     searchBook.setAuthor(parseElementRule(bookElement, authorRule));
                 }
 
-                String kindRule = getJsonString(rules, "kind");
+                String kindRule = rules.getKind();
                 if (kindRule != null) {
                     searchBook.setKind(parseElementRule(bookElement, kindRule));
                 }
 
-                String introRule = getJsonString(rules, "intro");
+                String introRule = rules.getIntro();
                 if (introRule != null) {
                     searchBook.setIntro(parseElementRule(bookElement, introRule));
                 }
 
-                String bookUrlRule = getJsonString(rules, "bookUrl");
+                String bookUrlRule = rules.getBookUrl();
                 if (bookUrlRule != null) {
                     String bookUrl = parseElementRule(bookElement, bookUrlRule);
                     // 处理相对URL
@@ -160,7 +186,7 @@ public class WebBookService {
                     searchBook.setBookUrl(bookUrl);
                 }
 
-                String coverUrlRule = getJsonString(rules, "coverUrl");
+                String coverUrlRule = rules.getCoverUrl();
                 if (coverUrlRule != null) {
                     searchBook.setCoverUrl(parseElementRule(bookElement, coverUrlRule));
                 }
@@ -180,15 +206,45 @@ public class WebBookService {
     /**
      * 解析JSON搜索结果
      */
-    private List<SearchBook> parseJsonSearchResult(String json, JsonObject rules, BookSource bookSource) {
+    private List<SearchBook> parseJsonSearchResult(String json, com.htmake.reader.entity.rule.SearchRule rules,
+            BookSource bookSource) {
         List<SearchBook> searchBooks = new ArrayList<>();
 
         try {
-            String bookListRule = getJsonString(rules, "bookList");
+            String bookListRule = rules.getBookList();
             List<String> bookListJson = RuleParser.parseList(json, "@json:" + bookListRule);
 
-            // 简化处理：JSON解析较复杂，暂返回空
+            // 简化处理：JSON解析目前通过 RuleParser 处理具体字段
             log.info("JSON搜索结果解析: 发现{}条", bookListJson.size());
+
+            for (String itemJson : bookListJson) {
+                SearchBook searchBook = new SearchBook();
+                searchBook.setOrigin(bookSource.getBookSourceUrl());
+                searchBook.setOriginName(bookSource.getBookSourceName());
+                searchBook.setType(bookSource.getBookSourceType());
+
+                if (rules.getName() != null)
+                    searchBook.setName(RuleParser.parse(itemJson, "@json:" + rules.getName()));
+                if (rules.getAuthor() != null)
+                    searchBook.setAuthor(RuleParser.parse(itemJson, "@json:" + rules.getAuthor()));
+                if (rules.getKind() != null)
+                    searchBook.setKind(RuleParser.parse(itemJson, "@json:" + rules.getKind()));
+                if (rules.getIntro() != null)
+                    searchBook.setIntro(RuleParser.parse(itemJson, "@json:" + rules.getIntro()));
+                if (rules.getBookUrl() != null) {
+                    String bookUrl = RuleParser.parse(itemJson, "@json:" + rules.getBookUrl());
+                    if (bookUrl != null && !bookUrl.startsWith("http")) {
+                        bookUrl = bookSource.getBookSourceUrl() + bookUrl;
+                    }
+                    searchBook.setBookUrl(bookUrl);
+                }
+                if (rules.getCoverUrl() != null)
+                    searchBook.setCoverUrl(RuleParser.parse(itemJson, "@json:" + rules.getCoverUrl()));
+
+                if (searchBook.getName() != null && !searchBook.getName().isEmpty()) {
+                    searchBooks.add(searchBook);
+                }
+            }
 
         } catch (Exception e) {
             log.error("解析JSON搜索结果失败", e);
@@ -255,32 +311,24 @@ public class WebBookService {
         book.setType(bookSource.getBookSourceType());
 
         // 解析书籍详情
-        String ruleBookInfo = bookSource.getRuleBookInfo();
-        if (ruleBookInfo != null && !ruleBookInfo.isEmpty()) {
+        var rules = bookSource.getRuleBookInfo();
+        if (rules != null) {
             try {
-                JsonObject rules = JsonParser.parseString(ruleBookInfo).getAsJsonObject();
-                Document doc = Jsoup.parse(html);
-
-                String nameRule = getJsonString(rules, "name");
-                if (nameRule != null) {
-                    book.setName(RuleParser.parse(html, nameRule));
+                if (rules.getName() != null) {
+                    book.setName(RuleParser.parse(html, rules.getName()));
                 }
-
-                String authorRule = getJsonString(rules, "author");
-                if (authorRule != null) {
-                    book.setAuthor(RuleParser.parse(html, authorRule));
+                if (rules.getAuthor() != null) {
+                    book.setAuthor(RuleParser.parse(html, rules.getAuthor()));
                 }
-
-                String introRule = getJsonString(rules, "intro");
-                if (introRule != null) {
-                    book.setIntro(RuleParser.parse(html, introRule));
+                if (rules.getIntro() != null) {
+                    book.setIntro(RuleParser.parse(html, rules.getIntro()));
                 }
-
-                String coverUrlRule = getJsonString(rules, "coverUrl");
-                if (coverUrlRule != null) {
-                    book.setCoverUrl(RuleParser.parse(html, coverUrlRule));
+                if (rules.getCoverUrl() != null) {
+                    book.setCoverUrl(RuleParser.parse(html, rules.getCoverUrl()));
                 }
-
+                if (rules.getTocUrl() != null) {
+                    book.setTocUrl(RuleParser.parse(html, rules.getTocUrl()));
+                }
             } catch (Exception e) {
                 log.error("解析书籍详情失败", e);
             }
@@ -308,12 +356,10 @@ public class WebBookService {
 
         String html = HttpUtils.get(tocUrl);
 
-        String ruleToc = bookSource.getRuleToc();
-        if (ruleToc != null && !ruleToc.isEmpty()) {
+        var rules = bookSource.getRuleToc();
+        if (rules != null) {
             try {
-                JsonObject rules = JsonParser.parseString(ruleToc).getAsJsonObject();
-                String chapterListRule = getJsonString(rules, "chapterList");
-
+                String chapterListRule = rules.getChapterList();
                 if (chapterListRule != null) {
                     Document doc = Jsoup.parse(html);
                     Elements chapterElements = doc.select(chapterListRule);
@@ -323,12 +369,12 @@ public class WebBookService {
                         BookChapter chapter = new BookChapter();
                         chapter.setIndex(index);
 
-                        String nameRule = getJsonString(rules, "chapterName");
+                        String nameRule = rules.getChapterName();
                         if (nameRule != null) {
                             chapter.setTitle(parseElementRule(chapterElement, nameRule));
                         }
 
-                        String urlRule = getJsonString(rules, "chapterUrl");
+                        String urlRule = rules.getChapterUrl();
                         if (urlRule != null) {
                             String chapterUrl = parseElementRule(chapterElement, urlRule);
                             if (chapterUrl != null && !chapterUrl.startsWith("http")) {
@@ -364,12 +410,10 @@ public class WebBookService {
 
         String html = HttpUtils.get(chapter.getUrl());
 
-        String ruleContent = bookSource.getRuleContent();
-        if (ruleContent != null && !ruleContent.isEmpty()) {
+        var rules = bookSource.getRuleContent();
+        if (rules != null) {
             try {
-                JsonObject rules = JsonParser.parseString(ruleContent).getAsJsonObject();
-                String contentRule = getJsonString(rules, "content");
-
+                String contentRule = rules.getContent();
                 if (contentRule != null) {
                     return RuleParser.parse(html, contentRule);
                 }
@@ -379,19 +423,5 @@ public class WebBookService {
         }
 
         return "";
-    }
-
-    /**
-     * 从JsonObject获取字符串
-     */
-    private String getJsonString(JsonObject json, String key) {
-        if (json == null || !json.has(key)) {
-            return null;
-        }
-        try {
-            return json.get(key).getAsString();
-        } catch (Exception e) {
-            return null;
-        }
     }
 }
