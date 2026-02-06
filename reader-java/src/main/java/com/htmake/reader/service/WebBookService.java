@@ -415,7 +415,7 @@ public class WebBookService {
             try {
                 String contentRule = rules.getContent();
                 if (contentRule != null) {
-                    return RuleParser.parse(html, contentRule);
+                    return RuleParser.parseJoin(html, contentRule, "\n");
                 }
             } catch (Exception e) {
                 log.error("解析章节内容失败", e);

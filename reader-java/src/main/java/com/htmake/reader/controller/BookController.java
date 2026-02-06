@@ -2421,9 +2421,36 @@ public class BookController {
     @RequestMapping(value = "/getChapterList", method = { RequestMethod.GET, RequestMethod.POST })
     public ReturnData getChapterList(@RequestParam(value = "url", required = false) String url,
             @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "refresh", required = false) Integer refresh,
             @RequestBody(required = false) Map<String, Object> body,
-            @RequestParam(value = "username", defaultValue = "default") String username) {
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
         try {
+            String finalAccessToken = accessToken;
+            if ((finalAccessToken == null || finalAccessToken.isEmpty()) && body != null
+                    && body.get("accessToken") != null) {
+                finalAccessToken = String.valueOf(body.get("accessToken"));
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())
+                    && (finalAccessToken == null || finalAccessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && finalAccessToken != null
+                    && !finalAccessToken.isEmpty()) {
+                String[] parts = finalAccessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
             String finalBookUrl = url != null && !url.isEmpty() ? url : bookUrl;
             if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body != null) {
                 Object v = body.get("url");
@@ -2443,7 +2470,49 @@ public class BookController {
                 return ReturnData.error("请输入书籍链接");
             }
 
-            List<BookChapter> chapterList = bookService.getChapterList(finalBookUrl, username);
+            int finalRefresh = refresh != null ? refresh : 0;
+            if (body != null && body.get("refresh") != null) {
+                Object v = body.get("refresh");
+                if (v instanceof Number) {
+                    finalRefresh = ((Number) v).intValue();
+                } else {
+                    try {
+                        finalRefresh = Integer.parseInt(String.valueOf(v));
+                    } catch (Exception ignore) {
+                        finalRefresh = 0;
+                    }
+                }
+            }
+
+            Book bookInfo = bookService.getShelfBookByURL(finalBookUrl, finalUser);
+            if (bookInfo == null) {
+                return ReturnData.error("请先加入书架");
+            }
+
+            List<BookChapter> chapterList = bookService.getChapterList(finalBookUrl, finalUser);
+            if (finalRefresh > 0 || chapterList == null || chapterList.isEmpty()) {
+                if (!bookInfo.isLocalBook() && !"loc_book".equals(bookInfo.getOrigin())) {
+                    BookSource bookSource = bookSourceService.getBookSourceByUrl(bookInfo.getOrigin(), finalUser);
+                    if (bookSource == null) {
+                        return ReturnData.error("未配置书源");
+                    }
+                    chapterList = webBookService.getChapterList(bookSource, bookInfo);
+                    if (chapterList != null) {
+                        for (BookChapter ch : chapterList) {
+                            if (ch != null) {
+                                ch.setBookUrl(finalBookUrl);
+                            }
+                        }
+                    }
+                    if (chapterList != null && !chapterList.isEmpty()) {
+                        bookService.saveChapterList(finalBookUrl, chapterList, finalUser);
+                    }
+                }
+            }
+
+            if (chapterList == null) {
+                chapterList = new ArrayList<>();
+            }
             return ReturnData.success(chapterList);
         } catch (Exception e) {
             log.error("获取章节列表失败", e);
@@ -2802,16 +2871,92 @@ public class BookController {
     /**
      * 获取章节内容
      */
-    @GetMapping("/getBookContent")
-    public ReturnData getBookContent(@RequestParam("bookUrl") String bookUrl,
-            @RequestParam("chapterIndex") int chapterIndex,
-            @RequestParam(value = "username", defaultValue = "default") String username) {
+    @RequestMapping(value = "/getBookContent",method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getBookContent(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "index", required = false) Integer index,
+            @RequestParam(value = "chapterIndex", required = false) Integer chapterIndex,
+            @RequestParam(value = "refresh", required = false) Integer refresh,
+            @RequestParam(value = "cache", required = false) Integer cache,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
         try {
-            if (bookUrl == null || bookUrl.isEmpty()) {
+            String finalAccessToken = accessToken;
+            if ((finalAccessToken == null || finalAccessToken.isEmpty()) && body != null
+                    && body.get("accessToken") != null) {
+                finalAccessToken = String.valueOf(body.get("accessToken"));
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())
+                    && (finalAccessToken == null || finalAccessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && finalAccessToken != null
+                    && !finalAccessToken.isEmpty()) {
+                String[] parts = finalAccessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String finalBookUrl = (url != null && !url.isEmpty()) ? url : bookUrl;
+            if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body != null) {
+                Object v = body.get("url");
+                if (v != null) {
+                    finalBookUrl = String.valueOf(v);
+                } else if (body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                }
+            }
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
                 return ReturnData.error("书籍URL不能为空");
             }
 
-            String content = bookService.getChapterContent(bookUrl, chapterIndex, username);
+            Integer finalChapterIndex = chapterIndex != null ? chapterIndex : index;
+            if (finalChapterIndex == null && body != null) {
+                Object v = body.get("chapterIndex");
+                if (v == null) {
+                    v = body.get("index");
+                }
+                if (v instanceof Number) {
+                    finalChapterIndex = ((Number) v).intValue();
+                } else if (v != null) {
+                    try {
+                        finalChapterIndex = Integer.parseInt(String.valueOf(v));
+                    } catch (Exception ignore) {
+                        finalChapterIndex = null;
+                    }
+                }
+            }
+            if (finalChapterIndex == null) {
+                return ReturnData.error("章节索引不能为空");
+            }
+
+            boolean refreshFlag = false;
+            if (refresh != null && refresh > 0) {
+                refreshFlag = true;
+            } else if (body != null && body.get("refresh") != null) {
+                Object v = body.get("refresh");
+                if (v instanceof Number) {
+                    refreshFlag = ((Number) v).intValue() > 0;
+                } else {
+                    try {
+                        refreshFlag = Integer.parseInt(String.valueOf(v)) > 0;
+                    } catch (Exception ignore) {
+                        refreshFlag = false;
+                    }
+                }
+            }
+
+            String content = bookService.getChapterContent(finalBookUrl, finalChapterIndex, finalUser, refreshFlag);
             return ReturnData.success(content);
         } catch (Exception e) {
             log.error("获取章节内容失败", e);

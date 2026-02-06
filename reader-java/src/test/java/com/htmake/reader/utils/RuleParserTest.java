@@ -62,6 +62,12 @@ class RuleParserTest {
     }
 
     @Test
+    void testCssSelectorJoin() {
+        String result = RuleParser.parseJoin(SAMPLE_HTML, ".book-item .title", "\n");
+        assertEquals("书籍标题1\n书籍标题2", result);
+    }
+
+    @Test
     void testJsonPath() {
         String result = RuleParser.parse(SAMPLE_JSON, "@json:$.total");
         assertEquals("2", result);

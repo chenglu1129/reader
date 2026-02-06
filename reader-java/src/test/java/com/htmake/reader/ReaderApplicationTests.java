@@ -7,6 +7,10 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -54,6 +58,46 @@ class ReaderApplicationTests {
                 .param("v", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").value(false));
+    }
+
+    @Test
+    void postGetChapterListShouldReadUserChapters() throws Exception {
+        String user = "u1";
+        String bookUrl = "test-url-chapter";
+        String md5 = com.htmake.reader.utils.MD5Utils.md5Encode16(bookUrl);
+        Path bookDir = Paths.get("storage", "data", user, "shelf", md5);
+        Files.createDirectories(bookDir);
+        Files.writeString(bookDir.resolve("book.json"),
+                "{\"bookUrl\":\"" + bookUrl + "\",\"origin\":\"local\",\"name\":\"n\",\"author\":\"a\"}");
+        Files.writeString(bookDir.resolve("chapters.json"),
+                "[{\"url\":\"c1\",\"title\":\"t1\",\"bookUrl\":\"" + bookUrl + "\",\"index\":0}]");
+
+        mockMvc.perform(post("/reader3/getChapterList")
+                .contentType(APPLICATION_JSON)
+                .content("{\"url\":\"" + bookUrl + "\"}")
+                .param("accessToken", user + ":token")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data[0].title").value("t1"));
+    }
+
+    @Test
+    void postGetBookContentWithUrlAndIndexShouldNotBe400() throws Exception {
+        String user = "u1";
+        String bookUrl = "test-url";
+        String md5 = com.htmake.reader.utils.MD5Utils.md5Encode16(bookUrl);
+        Path bookDir = Paths.get("storage", "data", user, "shelf", md5);
+        Files.createDirectories(bookDir);
+        Files.writeString(bookDir.resolve("content_0.txt"), "hello-content");
+
+        mockMvc.perform(post("/reader3/getBookContent")
+                .contentType(APPLICATION_JSON)
+                .content("{\"url\":\"" + bookUrl + "\",\"index\":0,\"accessToken\":\"" + user + ":token\"}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data").value("hello-content"));
     }
 
     @Test

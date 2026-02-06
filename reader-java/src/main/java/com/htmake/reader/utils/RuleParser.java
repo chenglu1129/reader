@@ -86,6 +86,28 @@ public class RuleParser {
         }
     }
 
+    public static String parseJoin(String content, String rule, String delimiter) {
+        if (delimiter == null) {
+            delimiter = "\n";
+        }
+        List<String> list = parseList(content, rule);
+        if (list.isEmpty()) {
+            return parse(content, rule);
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            String item = list.get(i);
+            if (item == null) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(delimiter);
+            }
+            sb.append(item);
+        }
+        return sb.toString();
+    }
+
     /**
      * CSS选择器解析
      */

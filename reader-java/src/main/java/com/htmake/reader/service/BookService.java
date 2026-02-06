@@ -270,15 +270,78 @@ public class BookService {
      * 获取章节内容
      */
     public String getChapterContent(String bookUrl, int chapterIndex, String username) {
-        // 先从缓存获取
-        String content = getCachedContent(bookUrl, chapterIndex, username);
-        if (content != null && !content.isEmpty()) {
-            return content;
+        return getChapterContent(bookUrl, chapterIndex, username, false);
+    }
+
+    public String getChapterContent(String bookUrl, int chapterIndex, String username, boolean refresh) {
+        if (bookUrl == null || bookUrl.isEmpty()) {
+            return "";
         }
 
-        // TODO: 通过书源获取章节内容
-        log.info("获取章节内容: bookUrl={}, chapterIndex={}", bookUrl, chapterIndex);
-        return "章节内容加载中...（功能待完善）";
+        if (!refresh) {
+            String cached = getCachedContent(bookUrl, chapterIndex, username);
+            if (cached != null && !cached.isEmpty()) {
+                return cached;
+            }
+        }
+
+        Book book = getShelfBookByURL(bookUrl, username);
+        if (book == null) {
+            return "";
+        }
+        if (book.isLocalBook() || "loc_book".equals(book.getOrigin())) {
+            return "";
+        }
+
+        BookSource bookSource = bookSourceService.getBookSourceByUrl(book.getOrigin(), username);
+        if (bookSource == null) {
+            return "";
+        }
+
+        List<BookChapter> chapterList = getChapterList(bookUrl, username);
+        if (chapterList == null || chapterList.isEmpty()) {
+            try {
+                chapterList = webBookService.getChapterList(bookSource, book);
+            } catch (Exception e) {
+                log.warn("获取章节列表失败: bookUrl={}", bookUrl, e);
+                return "";
+            }
+            if (chapterList != null) {
+                for (BookChapter ch : chapterList) {
+                    if (ch != null) {
+                        ch.setBookUrl(bookUrl);
+                    }
+                }
+            }
+            if (chapterList != null && !chapterList.isEmpty()) {
+                saveChapterList(bookUrl, chapterList, username);
+            }
+        }
+
+        if (chapterList == null || chapterList.isEmpty()) {
+            return "";
+        }
+
+        if (chapterIndex < 0 || chapterIndex >= chapterList.size()) {
+            return "";
+        }
+
+        BookChapter chapter = chapterList.get(chapterIndex);
+        if (chapter == null || chapter.getUrl() == null || chapter.getUrl().isEmpty()) {
+            return "";
+        }
+
+        try {
+            String content = webBookService.getChapterContent(bookSource, chapter);
+            if (content == null || content.isEmpty()) {
+                return "";
+            }
+            saveChapterContent(bookUrl, chapterIndex, content, username);
+            return content;
+        } catch (Exception e) {
+            log.warn("获取章节内容失败: bookUrl={}, chapterIndex={}", bookUrl, chapterIndex, e);
+            return "";
+        }
     }
 
     /**
