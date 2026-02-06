@@ -179,4 +179,24 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
     }
+
+    @Test
+    void postDeleteBooksShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteBooks")
+                .contentType(APPLICATION_JSON)
+                .content("[{\"bookUrl\":\"http://example.com/book\"}]")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postAddBookGroupMultiShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/addBookGroupMulti")
+                .contentType(APPLICATION_JSON)
+                .content("{\"groupId\":1,\"bookList\":[{\"bookUrl\":\"http://example.com/book\"}]}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }
