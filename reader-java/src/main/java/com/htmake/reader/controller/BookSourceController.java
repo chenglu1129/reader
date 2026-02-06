@@ -1,12 +1,17 @@
 package com.htmake.reader.controller;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
 import com.htmake.reader.entity.BookSource;
 import com.htmake.reader.entity.ReturnData;
 import com.htmake.reader.service.BookSourceService;
+import com.htmake.reader.utils.StorageHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.File;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -20,8 +25,13 @@ import java.util.Map;
 @RequestMapping("/reader3")
 public class BookSourceController {
 
+    private static final Gson GSON = new Gson();
+
     @Autowired
     private BookSourceService bookSourceService;
+
+    @Autowired
+    private StorageHelper storageHelper;
 
     /**
      * 获取所有书源
@@ -99,6 +109,57 @@ public class BookSourceController {
         } catch (Exception e) {
             log.error("获取失效书源失败", e);
             return ReturnData.error("获取失效书源失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getRssSources", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getRssSources(@RequestParam(value = "simple", required = false) Integer simple,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            int finalSimple = simple != null ? simple : 0;
+            if (body != null && body.get("simple") != null) {
+                Object v = body.get("simple");
+                if (v instanceof Number) {
+                    finalSimple = ((Number) v).intValue();
+                } else {
+                    try {
+                        finalSimple = Integer.parseInt(String.valueOf(v));
+                    } catch (Exception ignore) {
+                        finalSimple = 0;
+                    }
+                }
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : "default";
+
+            String rssSourcePath = storageHelper.getUserDataPath(finalUser) + File.separator + "rssSources.json";
+            File rssSourceFile = new File(rssSourcePath);
+            if (!rssSourceFile.exists()) {
+                return ReturnData.success(new ArrayList<>());
+            }
+
+            String json = storageHelper.readFile(rssSourcePath);
+            if (json == null || json.isEmpty()) {
+                return ReturnData.success(new ArrayList<>());
+            }
+
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            List<Map<String, Object>> sources = GSON.fromJson(json, listType);
+            if (sources == null) {
+                sources = new ArrayList<>();
+            }
+
+            if (finalSimple > 0) {
+                return ReturnData.success(sources);
+            }
+            return ReturnData.success(sources);
+        } catch (Exception e) {
+            log.error("获取RSS源列表失败", e);
+            return ReturnData.error("获取RSS源列表失败: " + e.getMessage());
         }
     }
 

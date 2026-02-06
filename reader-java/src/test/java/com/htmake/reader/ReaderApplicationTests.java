@@ -93,4 +93,29 @@ class ReaderApplicationTests {
                 .andExpect(jsonPath("$.data.secure").exists())
                 .andExpect(jsonPath("$.data.secureKey").exists());
     }
+
+    @Test
+    void getRssSourcesShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getRssSources")
+                .param("simple", "1")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true));
+    }
+
+    @Test
+    void getShelfBookWithCacheInfoShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getShelfBookWithCacheInfo")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void getBookGroupsShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getBookGroups")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }

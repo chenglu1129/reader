@@ -337,6 +337,19 @@ public class BookService {
         return storageHelper.writeFile(contentFile.getAbsolutePath(), content);
     }
 
+    public int getCachedChapterCount(String bookUrl, String username) {
+        if (bookUrl == null || bookUrl.isEmpty()) {
+            return 0;
+        }
+        String bookDir = getBookDir(bookUrl, username);
+        File dir = new File(bookDir);
+        if (!dir.exists() || !dir.isDirectory()) {
+            return 0;
+        }
+        File[] cached = dir.listFiles(f -> f != null && f.isFile() && f.getName().startsWith("content_") && f.getName().endsWith(".txt"));
+        return cached == null ? 0 : cached.length;
+    }
+
     /**
      * 获取书架路径
      */

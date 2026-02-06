@@ -1,13 +1,21 @@
 package com.htmake.reader.controller;
 
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import com.htmake.reader.config.ReaderConfig;
 import com.htmake.reader.entity.Book;
 import com.htmake.reader.entity.BookChapter;
 import com.htmake.reader.entity.ReturnData;
 import com.htmake.reader.service.BookService;
+import com.htmake.reader.utils.StorageHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.File;
+import java.lang.reflect.Type;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -19,8 +27,16 @@ import java.util.Map;
 @RequestMapping("/reader3")
 public class BookController {
 
+    private static final Gson GSON = new Gson();
+
     @Autowired
     private BookService bookService;
+
+    @Autowired
+    private ReaderConfig readerConfig;
+
+    @Autowired
+    private StorageHelper storageHelper;
 
     /**
      * 获取书架列表
@@ -52,6 +68,104 @@ public class BookController {
         } catch (Exception e) {
             log.error("获取书架列表失败", e);
             return ReturnData.error("获取书架列表失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getBookGroups", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getBookGroups(@RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            List<Map<String, Object>> defaultGroups = new ArrayList<>();
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -1, "groupName", "全部", "order", -10, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -2, "groupName", "本地", "order", -9, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -3, "groupName", "音频", "order", -8, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -4, "groupName", "未分组", "order", -7, "show", true)));
+
+            String groupPath = storageHelper.getUserDataPath(finalUser) + File.separator + "bookGroup.json";
+            File groupFile = new File(groupPath);
+            if (!groupFile.exists()) {
+                return ReturnData.success(defaultGroups);
+            }
+
+            String json = storageHelper.readFile(groupPath);
+            if (json == null || json.isEmpty()) {
+                return ReturnData.success(defaultGroups);
+            }
+
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            List<Map<String, Object>> groups = GSON.fromJson(json, listType);
+            if (groups == null) {
+                groups = defaultGroups;
+            }
+            return ReturnData.success(groups);
+        } catch (Exception e) {
+            log.error("获取分组列表失败", e);
+            return ReturnData.error("获取分组列表失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getShelfBookWithCacheInfo", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getShelfBookWithCacheInfo(@RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            List<Book> bookList = bookService.getShelfBookList(finalUser);
+            List<Object> result = new ArrayList<>();
+            Type mapType = new TypeToken<Map<String, Object>>() {
+            }.getType();
+            for (Book book : bookList) {
+                if (book == null) {
+                    continue;
+                }
+                if (!book.isLocalBook()) {
+                    Map<String, Object> bookMap = GSON.fromJson(GSON.toJson(book), mapType);
+                    if (bookMap == null) {
+                        bookMap = new HashMap<>();
+                    }
+                    bookMap.put("cachedChapterCount", bookService.getCachedChapterCount(book.getBookUrl(), finalUser));
+                    result.add(bookMap);
+                } else {
+                    result.add(book);
+                }
+            }
+            return ReturnData.success(result);
+        } catch (Exception e) {
+            log.error("获取书架缓存信息失败", e);
+            return ReturnData.error("获取书架缓存信息失败: " + e.getMessage());
         }
     }
 
