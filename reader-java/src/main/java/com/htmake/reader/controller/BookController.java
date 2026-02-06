@@ -1738,6 +1738,309 @@ public class BookController {
         return emitter;
     }
 
+    @RequestMapping(value = "/searchBookSourceSSE", method = { RequestMethod.GET,
+            RequestMethod.POST }, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter searchBookSourceSSE(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "lastIndex", required = false) Integer lastIndex,
+            @RequestParam(value = "searchSize", required = false) Integer searchSize,
+            @RequestParam(value = "bookSourceGroup", required = false) String bookSourceGroup,
+            @RequestParam(value = "refresh", required = false) Integer refresh,
+            @RequestParam(value = "concurrentCount", required = false) Integer concurrentCount,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        SseEmitter emitter = new SseEmitter(0L);
+        AtomicBoolean canceled = new AtomicBoolean(false);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        emitter.onCompletion(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onTimeout(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onError((e) -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+
+        executor.execute(() -> {
+            ExecutorService pool = null;
+            try {
+                String finalAccessToken = accessToken;
+                if ((finalAccessToken == null || finalAccessToken.isEmpty()) && body != null
+                        && body.get("accessToken") != null) {
+                    finalAccessToken = String.valueOf(body.get("accessToken"));
+                }
+
+                if (Boolean.TRUE.equals(readerConfig.getSecure())
+                        && (finalAccessToken == null || finalAccessToken.isEmpty())) {
+                    ReturnData rd = new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                        : (username != null && !username.isEmpty()) ? username : null;
+                if ((finalUser == null || finalUser.isEmpty()) && finalAccessToken != null
+                        && !finalAccessToken.isEmpty()) {
+                    String[] parts = finalAccessToken.split(":", 2);
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        finalUser = parts[0];
+                    }
+                }
+                if (finalUser == null || finalUser.isEmpty()) {
+                    finalUser = "default";
+                }
+
+                String finalUrl = url;
+                Integer finalLastIndex = lastIndex;
+                Integer finalSearchSize = searchSize;
+                String finalGroup = bookSourceGroup;
+                Integer finalRefresh = refresh;
+                Integer finalConcurrent = concurrentCount;
+                if (body != null) {
+                    if ((finalUrl == null || finalUrl.isEmpty()) && body.get("url") != null) {
+                        finalUrl = String.valueOf(body.get("url"));
+                    }
+                    if (finalLastIndex == null && body.get("lastIndex") instanceof Number) {
+                        finalLastIndex = ((Number) body.get("lastIndex")).intValue();
+                    }
+                    if (finalSearchSize == null && body.get("searchSize") instanceof Number) {
+                        finalSearchSize = ((Number) body.get("searchSize")).intValue();
+                    }
+                    if (finalGroup == null && body.get("bookSourceGroup") != null) {
+                        finalGroup = String.valueOf(body.get("bookSourceGroup"));
+                    }
+                    if (finalRefresh == null && body.get("refresh") instanceof Number) {
+                        finalRefresh = ((Number) body.get("refresh")).intValue();
+                    }
+                    if (finalConcurrent == null && body.get("concurrentCount") instanceof Number) {
+                        finalConcurrent = ((Number) body.get("concurrentCount")).intValue();
+                    }
+                }
+
+                int startIndex = finalLastIndex == null ? -1 : finalLastIndex;
+                int sizeLimit = finalSearchSize == null || finalSearchSize <= 0 ? 30 : finalSearchSize;
+                int refreshFlag = finalRefresh == null ? 0 : finalRefresh;
+
+                List<BookSource> sources = bookSourceService.getBookSourcesByGroup(finalGroup, finalUser);
+                if (sources == null || sources.isEmpty()) {
+                    ReturnData rd = ReturnData.error("未配置书源");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+                if (finalUrl == null || finalUrl.isEmpty()) {
+                    ReturnData rd = ReturnData.error("请输入书籍链接");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                Book book = bookService.getShelfBookByURL(finalUrl, finalUser);
+                if (book == null) {
+                    ReturnData rd = ReturnData.error("书籍信息错误");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                String bookName = book.getName() == null ? "" : book.getName();
+                String bookAuthor = book.getAuthor() == null ? "" : book.getAuthor();
+                String bookSourcePath = storageHelper.getUserDataPath(finalUser) + File.separator + bookName + "_"
+                        + bookAuthor + File.separator + "bookSource.json";
+                File bookSourceFile = new File(bookSourcePath);
+
+                List<SearchBook> localSources = new ArrayList<>();
+                if (bookSourceFile.exists() && refreshFlag <= 0) {
+                    String json = storageHelper.readFile(bookSourcePath);
+                    if (json != null && !json.isEmpty()) {
+                        try {
+                            Type listType = new TypeToken<List<SearchBook>>() {
+                            }.getType();
+                            List<SearchBook> parsed = GSON.fromJson(json, listType);
+                            if (parsed != null) {
+                                localSources = parsed;
+                            }
+                        } catch (Exception e) {
+                            log.warn("解析书源缓存失败: {}", bookSourcePath, e);
+                        }
+                    }
+                }
+
+                if (!localSources.isEmpty() && refreshFlag <= 0) {
+                    try {
+                        Map<String, Integer> sourceIndex = new HashMap<>();
+                        for (int i = 0; i < sources.size(); i++) {
+                            BookSource bs = sources.get(i);
+                            if (bs != null && bs.getBookSourceUrl() != null && !bs.getBookSourceUrl().isEmpty()) {
+                                sourceIndex.put(bs.getBookSourceUrl(), i);
+                            }
+                        }
+                        SearchBook last = localSources.get(localSources.size() - 1);
+                        if (last != null && last.getOrigin() != null && !last.getOrigin().isEmpty()) {
+                            int idx = sourceIndex.getOrDefault(last.getOrigin(), -1);
+                            startIndex = Math.max(startIndex, idx);
+                        }
+                    } catch (Exception e) {
+                        log.warn("校正 lastIndex 失败", e);
+                    }
+                }
+
+                if (startIndex >= sources.size() - 1) {
+                    ReturnData rd = new ReturnData(false, "没有更多了", Map.of("lastIndex", startIndex));
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                int computedConcurrent = Math.max(sizeLimit * 2, 24);
+                if (finalConcurrent != null && finalConcurrent > 0) {
+                    computedConcurrent = Math.max(computedConcurrent, finalConcurrent);
+                }
+
+                List<SearchBook> resultList = new ArrayList<>();
+                int currentIndex = startIndex;
+
+                while (!canceled.get() && currentIndex < sources.size() - 1 && resultList.size() < sizeLimit) {
+                    int batchStart = currentIndex + 1;
+                    int batchEnd = Math.min(batchStart + computedConcurrent, sources.size());
+                    pool = Executors.newFixedThreadPool(Math.max(1, batchEnd - batchStart));
+
+                    List<Callable<List<SearchBook>>> tasks = new ArrayList<>();
+                    for (int i = batchStart; i < batchEnd; i++) {
+                        final BookSource bookSource = sources.get(i);
+                        tasks.add(() -> {
+                            try {
+                                long start = System.currentTimeMillis();
+                                List<SearchBook> books = webBookService.searchBook(bookSource, bookName, 1);
+                                long end = System.currentTimeMillis();
+                                if (books == null) {
+                                    return new ArrayList<>();
+                                }
+                                List<SearchBook> filtered = new ArrayList<>();
+                                for (SearchBook item : books) {
+                                    if (item == null) {
+                                        continue;
+                                    }
+                                    String name = item.getName() == null ? "" : item.getName();
+                                    String author = item.getAuthor() == null ? "" : item.getAuthor();
+                                    if (name.equals(bookName) && author.equals(bookAuthor)) {
+                                        item.setTime(end - start);
+                                        filtered.add(item);
+                                    }
+                                }
+                                return filtered;
+                            } catch (Exception e) {
+                                log.warn("搜索书源失败: {}", bookSource == null ? "" : bookSource.getBookSourceName(), e);
+                                return new ArrayList<>();
+                            }
+                        });
+                    }
+
+                    List<Future<List<SearchBook>>> futures = new ArrayList<>();
+                    for (Callable<List<SearchBook>> task : tasks) {
+                        futures.add(pool.submit(task));
+                    }
+                    pool.shutdown();
+
+                    List<SearchBook> loopResult = new ArrayList<>();
+                    for (Future<List<SearchBook>> future : futures) {
+                        if (canceled.get()) {
+                            break;
+                        }
+                        List<SearchBook> books;
+                        try {
+                            books = future.get();
+                        } catch (Exception e) {
+                            continue;
+                        }
+                        if (books == null || books.isEmpty()) {
+                            continue;
+                        }
+                        for (SearchBook sb : books) {
+                            if (sb == null) {
+                                continue;
+                            }
+                            resultList.add(sb);
+                            loopResult.add(sb);
+                        }
+                    }
+
+                    currentIndex = batchEnd - 1;
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("lastIndex", currentIndex);
+                    payload.put("data", loopResult);
+                    emitter.send(
+                            SseEmitter.event().name("message").data(GSON.toJson(payload), MediaType.APPLICATION_JSON));
+                }
+
+                if (!canceled.get() && !bookName.isEmpty()) {
+                    List<SearchBook> merged = new ArrayList<>();
+                    if (bookSourceFile.exists()) {
+                        String json = storageHelper.readFile(bookSourcePath);
+                        if (json != null && !json.isEmpty()) {
+                            try {
+                                Type listType = new TypeToken<List<SearchBook>>() {
+                                }.getType();
+                                List<SearchBook> parsed = GSON.fromJson(json, listType);
+                                if (parsed != null) {
+                                    merged = parsed;
+                                }
+                            } catch (Exception e) {
+                                log.warn("解析书源缓存失败: {}", bookSourcePath, e);
+                            }
+                        }
+                    }
+
+                    for (SearchBook sb : resultList) {
+                        if (sb == null) {
+                            continue;
+                        }
+                        int existIndex = -1;
+                        for (int i = 0; i < merged.size(); i++) {
+                            SearchBook exist = merged.get(i);
+                            if (exist != null && exist.getBookUrl() != null && exist.getBookUrl().equals(sb.getBookUrl())) {
+                                existIndex = i;
+                                break;
+                            }
+                        }
+                        if (existIndex >= 0) {
+                            merged.set(existIndex, sb);
+                        } else {
+                            merged.add(sb);
+                        }
+                    }
+
+                    storageHelper.writeFile(bookSourcePath, GSON.toJson(merged));
+                }
+
+                Map<String, Object> end = new HashMap<>();
+                end.put("lastIndex", currentIndex);
+                emitter.send(SseEmitter.event().name("end").data(GSON.toJson(end), MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    ReturnData rd = ReturnData.error(e.getMessage() == null ? "搜索失败" : e.getMessage());
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                } catch (Exception ignore) {
+                }
+                emitter.complete();
+            } finally {
+                if (pool != null) {
+                    pool.shutdownNow();
+                }
+            }
+        });
+
+        return emitter;
+    }
+
     @PostMapping("/saveBookGroupOrder")
     public ReturnData saveBookGroupOrder(@RequestBody(required = false) Map<String, Object> body,
             @RequestParam(value = "accessToken", required = false) String accessToken,

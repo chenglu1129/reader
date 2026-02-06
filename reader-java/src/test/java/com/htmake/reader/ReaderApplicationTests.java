@@ -199,6 +199,16 @@ class ReaderApplicationTests {
     }
 
     @Test
+    void getSearchBookSourceSSEShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/searchBookSourceSSE")
+                .param("url", "http://example.com/book")
+                .param("bookSourceGroup", "音乐 书源")
+                .param("concurrentCount", "24")
+                .param("v", "0"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void postDeleteBookCacheShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/deleteBookCache")
                 .contentType(APPLICATION_JSON)
