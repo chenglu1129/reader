@@ -489,6 +489,103 @@ public class BookController {
         }
     }
 
+    @PostMapping("/removeBookGroupMulti")
+    public ReturnData removeBookGroupMulti(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (body == null) {
+                return ReturnData.error("分组信息错误");
+            }
+
+            Object groupIdObj = body.get("groupId");
+            if (!(groupIdObj instanceof Number)) {
+                return ReturnData.error("分组信息错误");
+            }
+            int groupId = ((Number) groupIdObj).intValue();
+            if (groupId <= 0) {
+                return ReturnData.error("分组信息错误");
+            }
+
+            Object listObj = body.get("bookList");
+            if (!(listObj instanceof List<?>)) {
+                return ReturnData.success("");
+            }
+
+            List<?> bookList = (List<?>) listObj;
+            if (bookList.isEmpty()) {
+                return ReturnData.success("");
+            }
+
+            List<Book> shelfBooks = null;
+            for (Object item : bookList) {
+                if (item == null) {
+                    continue;
+                }
+                Book incoming;
+                try {
+                    incoming = GSON.fromJson(GSON.toJson(item), Book.class);
+                } catch (Exception e) {
+                    continue;
+                }
+                if (incoming == null) {
+                    continue;
+                }
+                String bookUrl = incoming.getBookUrl();
+                if ((bookUrl == null || bookUrl.isEmpty()) && incoming.getName() != null
+                        && incoming.getAuthor() != null) {
+                    if (shelfBooks == null) {
+                        shelfBooks = bookService.getShelfBookList(finalUser);
+                    }
+                    for (Book shelfBook : shelfBooks) {
+                        if (shelfBook == null) {
+                            continue;
+                        }
+                        if (incoming.getName().equals(shelfBook.getName())
+                                && incoming.getAuthor().equals(shelfBook.getAuthor())) {
+                            bookUrl = shelfBook.getBookUrl();
+                            break;
+                        }
+                    }
+                }
+                if (bookUrl == null || bookUrl.isEmpty()) {
+                    continue;
+                }
+
+                Book shelfBook = bookService.getShelfBookByURL(bookUrl, finalUser);
+                if (shelfBook == null) {
+                    continue;
+                }
+                Integer currentGroup = shelfBook.getGroup();
+                int nextGroup = (currentGroup == null ? 0 : currentGroup) ^ groupId;
+                shelfBook.setGroup(nextGroup);
+                bookService.saveBook(shelfBook, finalUser);
+            }
+
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("批量移除分组失败", e);
+            return ReturnData.error("批量移除分组失败: " + e.getMessage());
+        }
+    }
+
     @RequestMapping(value = "/saveBookGroupId", method = { RequestMethod.GET, RequestMethod.POST })
     public ReturnData saveBookGroupId(@RequestParam(value = "bookUrl", required = false) String bookUrl,
             @RequestParam(value = "groupId", required = false) Integer groupId,
