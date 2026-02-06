@@ -74,4 +74,23 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").value(false));
     }
+
+    @Test
+    void postLogoutShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/logout")
+                .param("accessToken", "admin:dummy")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true));
+    }
+
+    @Test
+    void getUserInfoWithoutParamsShouldNotBe400() throws Exception {
+        mockMvc.perform(get("/reader3/getUserInfo")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data.secure").exists())
+                .andExpect(jsonPath("$.data.secureKey").exists());
+    }
 }
