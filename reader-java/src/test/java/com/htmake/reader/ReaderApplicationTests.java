@@ -162,6 +162,16 @@ class ReaderApplicationTests {
     }
 
     @Test
+    void postGetAvailableBookSourceShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/getAvailableBookSource")
+                .contentType(APPLICATION_JSON)
+                .content("{\"url\":\"http://example.com/book\",\"refresh\":0}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
     void postSaveBookGroupIdShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/saveBookGroupId")
                 .contentType(APPLICATION_JSON)
