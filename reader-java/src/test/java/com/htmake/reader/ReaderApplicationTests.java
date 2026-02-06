@@ -4,10 +4,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -205,6 +207,16 @@ class ReaderApplicationTests {
         mockMvc.perform(post("/reader3/removeBookGroupMulti")
                 .contentType(APPLICATION_JSON)
                 .content("{\"groupId\":1,\"bookList\":[{\"bookUrl\":\"http://example.com/book\"}]}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postImportBookPreviewShouldNotBe404() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file0", "test.txt", "text/plain", "hello".getBytes());
+        mockMvc.perform(multipart("/reader3/importBookPreview")
+                .file(file)
                 .param("v", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());

@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.lang.reflect.Type;
@@ -583,6 +584,97 @@ public class BookController {
         } catch (Exception e) {
             log.error("批量移除分组失败", e);
             return ReturnData.error("批量移除分组失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping(value = "/importBookPreview", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ReturnData importBookPreview(@RequestParam Map<String, MultipartFile> files,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            if (files == null || files.isEmpty()) {
+                return ReturnData.error("请上传书籍文件");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String assetsPath = storageHelper.getAssetsPath(finalUser);
+            List<Map<String, Object>> fileList = new ArrayList<>();
+
+            for (MultipartFile file : files.values()) {
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+
+                String originalName = file.getOriginalFilename();
+                if (originalName == null) {
+                    originalName = "book.txt";
+                }
+                originalName = originalName.replaceAll("^.*[\\\\/]", "");
+                int dotIndex = originalName.lastIndexOf('.');
+                String ext = dotIndex >= 0 ? originalName.substring(dotIndex + 1).toLowerCase() : "";
+                if (!"txt".equals(ext) && !"epub".equals(ext) && !"umd".equals(ext) && !"cbz".equals(ext)) {
+                    return ReturnData.error("不支持导入" + ext + "格式的书籍文件");
+                }
+
+                String baseName = dotIndex > 0 ? originalName.substring(0, dotIndex) : originalName;
+                baseName = baseName.replaceAll("[\\\\/:*?\"<>|]", "");
+                if (baseName.length() > 50) {
+                    baseName = baseName.substring(0, 50);
+                }
+                if (baseName.isEmpty()) {
+                    baseName = "book";
+                }
+
+                String fileName = baseName + "." + ext;
+                String localFilePath = assetsPath + File.separator + "book" + File.separator + fileName;
+                String localFileUrl = "/assets/" + finalUser + "/book/" + fileName;
+
+                File targetFile = new File(localFilePath);
+                if (!targetFile.getParentFile().exists()) {
+                    targetFile.getParentFile().mkdirs();
+                }
+                if (targetFile.exists()) {
+                    targetFile.delete();
+                }
+                file.transferTo(targetFile);
+
+                Book book = new Book();
+                book.setBookUrl(localFileUrl);
+                book.setOrigin("local");
+                book.setOriginName(localFilePath);
+                book.setName(baseName);
+                book.setAuthor("");
+                book.setCanUpdate(false);
+                book.setType(0);
+                book.setRootDir(readerConfig.getWorkDir());
+                book.setUserNameSpace(finalUser);
+
+                Map<String, Object> item = new HashMap<>();
+                item.put("book", book);
+                item.put("chapters", new ArrayList<>());
+                fileList.add(item);
+            }
+
+            return ReturnData.success(fileList);
+        } catch (Exception e) {
+            log.error("导入书籍预览失败", e);
+            return ReturnData.error("导入书籍预览失败: " + e.getMessage());
         }
     }
 
