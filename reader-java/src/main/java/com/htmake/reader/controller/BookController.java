@@ -2557,6 +2557,159 @@ public class BookController {
         }
     }
 
+    @RequestMapping(value = "/searchBookContent", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData searchBookContent(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "keyword", required = false) String keyword,
+            @RequestParam(value = "lastIndex", required = false) Integer lastIndex,
+            @RequestParam(value = "size", required = false) Integer size,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            String finalAccessToken = accessToken;
+            if ((finalAccessToken == null || finalAccessToken.isEmpty()) && body != null
+                    && body.get("accessToken") != null) {
+                finalAccessToken = String.valueOf(body.get("accessToken"));
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())
+                    && (finalAccessToken == null || finalAccessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && finalAccessToken != null
+                    && !finalAccessToken.isEmpty()) {
+                String[] parts = finalAccessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String finalBookUrl = url != null && !url.isEmpty() ? url : bookUrl;
+            String finalKeyword = keyword;
+            Integer finalLastIndex = lastIndex;
+            Integer finalSize = size;
+
+            if (body != null) {
+                if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body.get("url") != null) {
+                    finalBookUrl = String.valueOf(body.get("url"));
+                }
+                if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                }
+                if ((finalKeyword == null || finalKeyword.isEmpty()) && body.get("keyword") != null) {
+                    finalKeyword = String.valueOf(body.get("keyword"));
+                }
+                if (finalLastIndex == null && body.get("lastIndex") instanceof Number) {
+                    finalLastIndex = ((Number) body.get("lastIndex")).intValue();
+                }
+                if (finalLastIndex == null && body.get("lastIndex") != null) {
+                    try {
+                        finalLastIndex = Integer.parseInt(String.valueOf(body.get("lastIndex")));
+                    } catch (Exception ignore) {
+                        finalLastIndex = null;
+                    }
+                }
+                if (finalSize == null && body.get("size") instanceof Number) {
+                    finalSize = ((Number) body.get("size")).intValue();
+                }
+                if (finalSize == null && body.get("size") != null) {
+                    try {
+                        finalSize = Integer.parseInt(String.valueOf(body.get("size")));
+                    } catch (Exception ignore) {
+                        finalSize = null;
+                    }
+                }
+            }
+
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                return ReturnData.error("请输入书籍链接");
+            }
+            if (finalKeyword == null || finalKeyword.isEmpty()) {
+                return ReturnData.error("请输入搜索关键词");
+            }
+
+            int startIndex = finalLastIndex == null ? 0 : finalLastIndex;
+            int sizeLimit = finalSize == null || finalSize <= 0 ? 20 : finalSize;
+
+            Book bookInfo = bookService.getShelfBookByURL(finalBookUrl, finalUser);
+            if (bookInfo == null) {
+                return ReturnData.error("请先加入书架");
+            }
+
+            List<BookChapter> chapterList = bookService.getChapterList(finalBookUrl, finalUser);
+            if (startIndex >= chapterList.size()) {
+                return ReturnData.error("没有更多了");
+            }
+
+            List<Map<String, Object>> resultList = new ArrayList<>();
+            int currentIndex = startIndex + 1;
+            for (int pos = startIndex + 1; pos < chapterList.size(); pos++) {
+                currentIndex = pos;
+                BookChapter chapter = chapterList.get(pos);
+                int chapterIndex = chapter != null && chapter.getIndex() != null ? chapter.getIndex() : pos;
+
+                String chapterContent = bookService.getChapterContent(finalBookUrl, chapterIndex, finalUser);
+                if (chapterContent == null || chapterContent.isEmpty()) {
+                    continue;
+                }
+
+                List<Integer> positions = new ArrayList<>();
+                int idx = chapterContent.indexOf(finalKeyword);
+                while (idx >= 0) {
+                    positions.add(idx);
+                    idx = chapterContent.indexOf(finalKeyword, idx + 1);
+                }
+                if (positions.isEmpty()) {
+                    continue;
+                }
+
+                String chapterTitle = chapter == null || chapter.getTitle() == null ? "" : chapter.getTitle();
+                for (int i = 0; i < positions.size(); i++) {
+                    int queryIndexInChapter = positions.get(i);
+                    int left = Math.max(0, queryIndexInChapter - 20);
+                    int right = Math.min(chapterContent.length(),
+                            queryIndexInChapter + finalKeyword.length() + 20);
+                    String resultText = chapterContent.substring(left, right);
+                    int queryIndexInResult = queryIndexInChapter - left;
+
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("resultCount", 0);
+                    item.put("resultCountWithinChapter", i);
+                    item.put("resultText", resultText);
+                    item.put("chapterTitle", chapterTitle);
+                    item.put("query", finalKeyword);
+                    item.put("pageSize", 0);
+                    item.put("chapterIndex", chapterIndex);
+                    item.put("pageIndex", 0);
+                    item.put("queryIndexInResult", queryIndexInResult);
+                    item.put("queryIndexInChapter", queryIndexInChapter);
+                    resultList.add(item);
+
+                    if (resultList.size() >= sizeLimit) {
+                        break;
+                    }
+                }
+
+                if (resultList.size() >= sizeLimit) {
+                    break;
+                }
+            }
+
+            return ReturnData.success(Map.of("list", resultList, "lastIndex", currentIndex));
+        } catch (Exception e) {
+            log.error("搜索书籍内容失败", e);
+            return ReturnData.error("搜索书籍内容失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 搜索书籍
      */

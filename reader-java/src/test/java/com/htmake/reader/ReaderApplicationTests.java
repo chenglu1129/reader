@@ -209,6 +209,16 @@ class ReaderApplicationTests {
     }
 
     @Test
+    void postSearchBookContentShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/searchBookContent")
+                .contentType(APPLICATION_JSON)
+                .content("{\"url\":\"test-url\",\"keyword\":\"测试\",\"lastIndex\":-1,\"accessToken\":\"test-user:token\"}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
     void postDeleteBookCacheShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/deleteBookCache")
                 .contentType(APPLICATION_JSON)
