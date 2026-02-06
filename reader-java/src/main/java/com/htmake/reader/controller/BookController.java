@@ -871,6 +871,240 @@ public class BookController {
         }
     }
 
+    @RequestMapping(value = "/deleteLocalStoreFile", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData deleteLocalStoreFile(@RequestParam(value = "path", required = false) String path,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS,
+            @RequestParam(value = "secureKey", required = false) String secureKey) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+                if (Boolean.FALSE.equals(user.getEnableLocalStore())) {
+                    return ReturnData.error("未开启本地书仓功能");
+                }
+            }
+
+            String configKey = readerConfig.getSecureKey();
+            if (configKey != null && !configKey.isEmpty()) {
+                if (secureKey == null || secureKey.isEmpty() || !configKey.equals(secureKey)) {
+                    return new ReturnData(false, "请输入管理密码", "NEED_SECURE_KEY");
+                }
+            }
+
+            String finalPath = path;
+            if ((finalPath == null || finalPath.isEmpty()) && body != null && body.get("path") != null) {
+                finalPath = String.valueOf(body.get("path"));
+            }
+            if (finalPath == null || finalPath.isEmpty()) {
+                return ReturnData.error("参数错误");
+            }
+
+            String home = storageHelper.getLocalStorePath();
+            File file = new File(home + finalPath);
+            log.info("file: {} {}", finalPath, file);
+            if (!file.exists()) {
+                return ReturnData.error("路径不存在");
+            }
+            if (!deleteRecursively(file)) {
+                return ReturnData.error("删除失败");
+            }
+
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("删除本地书仓文件失败", e);
+            return ReturnData.error("删除本地书仓文件失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping(value = "/uploadFileToLocalStore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ReturnData uploadFileToLocalStore(@RequestParam Map<String, MultipartFile> files,
+            @RequestParam(value = "path", required = false) String path,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS,
+            @RequestParam(value = "secureKey", required = false) String secureKey) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            if (files == null || files.isEmpty()) {
+                return ReturnData.error("请上传文件");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+                if (Boolean.FALSE.equals(user.getEnableLocalStore())) {
+                    return ReturnData.error("未开启本地书仓功能");
+                }
+            }
+
+            String configKey = readerConfig.getSecureKey();
+            if (configKey != null && !configKey.isEmpty()) {
+                if (secureKey == null || secureKey.isEmpty() || !configKey.equals(secureKey)) {
+                    return new ReturnData(false, "请输入管理密码", "NEED_SECURE_KEY");
+                }
+            }
+
+            String finalPath = path == null ? "" : path;
+            String home = storageHelper.getLocalStorePath();
+            List<Map<String, Object>> fileList = new ArrayList<>();
+
+            for (MultipartFile file : files.values()) {
+                if (file == null || file.isEmpty()) {
+                    continue;
+                }
+                String fileName = file.getOriginalFilename();
+                if (fileName == null || fileName.isEmpty()) {
+                    fileName = "file";
+                }
+                fileName = fileName.replaceAll("^.*[\\\\/]", "");
+                File newFile = new File(home + File.separator + finalPath + File.separator + fileName);
+                if (!newFile.getParentFile().exists()) {
+                    newFile.getParentFile().mkdirs();
+                }
+                if (newFile.exists()) {
+                    newFile.delete();
+                }
+                log.info("moveTo: {}", newFile);
+                file.transferTo(newFile);
+
+                Map<String, Object> item = new HashMap<>();
+                item.put("name", newFile.getName());
+                item.put("size", newFile.length());
+                item.put("path", newFile.toString().replace(home, ""));
+                item.put("lastModified", newFile.lastModified());
+                item.put("isDirectory", newFile.isDirectory());
+                fileList.add(item);
+            }
+
+            return ReturnData.success(fileList);
+        } catch (Exception e) {
+            log.error("上传本地书仓文件失败", e);
+            return ReturnData.error("上传本地书仓文件失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping(value = "/deleteLocalStoreFileList")
+    public ReturnData deleteLocalStoreFileList(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS,
+            @RequestParam(value = "secureKey", required = false) String secureKey) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+                if (Boolean.FALSE.equals(user.getEnableLocalStore())) {
+                    return ReturnData.error("未开启本地书仓功能");
+                }
+            }
+
+            String configKey = readerConfig.getSecureKey();
+            if (configKey != null && !configKey.isEmpty()) {
+                if (secureKey == null || secureKey.isEmpty() || !configKey.equals(secureKey)) {
+                    return new ReturnData(false, "请输入管理密码", "NEED_SECURE_KEY");
+                }
+            }
+
+            if (body == null) {
+                return ReturnData.error("参数错误");
+            }
+            Object pathObj = body.get("path");
+            if (!(pathObj instanceof List<?>)) {
+                return ReturnData.error("参数错误");
+            }
+
+            String home = storageHelper.getLocalStorePath();
+            List<?> paths = (List<?>) pathObj;
+            for (Object item : paths) {
+                if (item == null) {
+                    continue;
+                }
+                String filePath = String.valueOf(item);
+                if (filePath.isEmpty()) {
+                    continue;
+                }
+                File file = new File(home + filePath);
+                deleteRecursively(file);
+            }
+
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("批量删除本地书仓文件失败", e);
+            return ReturnData.error("批量删除本地书仓文件失败: " + e.getMessage());
+        }
+    }
+
+    private boolean deleteRecursively(File file) {
+        if (file == null) {
+            return false;
+        }
+        if (file.isDirectory()) {
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    deleteRecursively(f);
+                }
+            }
+        }
+        return file.delete();
+    }
+
     @RequestMapping(value = "/saveBookGroupId", method = { RequestMethod.GET, RequestMethod.POST })
     public ReturnData saveBookGroupId(@RequestParam(value = "bookUrl", required = false) String bookUrl,
             @RequestParam(value = "groupId", required = false) Integer groupId,

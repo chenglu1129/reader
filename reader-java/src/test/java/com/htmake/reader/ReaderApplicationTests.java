@@ -240,4 +240,35 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
     }
+
+    @Test
+    void postDeleteLocalStoreFileShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteLocalStoreFile")
+                .contentType(APPLICATION_JSON)
+                .content("{\"path\":\"/__not_exists__\"}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postDeleteLocalStoreFileListShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteLocalStoreFileList")
+                .contentType(APPLICATION_JSON)
+                .content("{\"path\":[\"/__not_exists__\"]}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postUploadFileToLocalStoreShouldNotBe404() throws Exception {
+        MockMultipartFile file = new MockMultipartFile("file0", "test.txt", "text/plain", "hello".getBytes());
+        mockMvc.perform(multipart("/reader3/uploadFileToLocalStore")
+                .file(file)
+                .param("path", "/")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }
