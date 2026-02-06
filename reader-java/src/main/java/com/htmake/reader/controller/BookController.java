@@ -23,7 +23,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
+import java.io.InputStream;
 import java.lang.reflect.Type;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -46,6 +48,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class BookController {
 
     private static final Gson GSON = new Gson();
+    private static volatile List<Map<String, Object>> DEFAULT_TXT_TOC_RULES;
 
     @Autowired
     private BookService bookService;
@@ -64,6 +67,75 @@ public class BookController {
 
     @Autowired
     private UserService userService;
+
+    @RequestMapping(value = "/getTxtTocRules", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getTxtTocRules(@RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS,
+            @RequestBody(required = false) Map<String, Object> body) {
+        try {
+            String finalAccessToken = accessToken;
+            if ((finalAccessToken == null || finalAccessToken.isEmpty()) && body != null && body.get("accessToken") != null) {
+                finalAccessToken = String.valueOf(body.get("accessToken"));
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())
+                    && (finalAccessToken == null || finalAccessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && finalAccessToken != null && !finalAccessToken.isEmpty()) {
+                String[] parts = finalAccessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+            }
+
+            return ReturnData.success(getDefaultTxtTocRules());
+        } catch (Exception e) {
+            log.error("获取TXT目录规则失败", e);
+            return ReturnData.error("获取TXT目录规则失败: " + e.getMessage());
+        }
+    }
+
+    private List<Map<String, Object>> getDefaultTxtTocRules() {
+        List<Map<String, Object>> cached = DEFAULT_TXT_TOC_RULES;
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (BookController.class) {
+            if (DEFAULT_TXT_TOC_RULES != null) {
+                return DEFAULT_TXT_TOC_RULES;
+            }
+            try (InputStream is = BookController.class.getClassLoader().getResourceAsStream("defaultData/txtTocRule.json")) {
+                if (is == null) {
+                    DEFAULT_TXT_TOC_RULES = new ArrayList<>();
+                    return DEFAULT_TXT_TOC_RULES;
+                }
+                String json = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                Type type = new TypeToken<List<Map<String, Object>>>() {
+                }.getType();
+                List<Map<String, Object>> list = GSON.fromJson(json, type);
+                DEFAULT_TXT_TOC_RULES = list == null ? new ArrayList<>() : list;
+                return DEFAULT_TXT_TOC_RULES;
+            } catch (Exception e) {
+                DEFAULT_TXT_TOC_RULES = new ArrayList<>();
+                return DEFAULT_TXT_TOC_RULES;
+            }
+        }
+    }
 
     /**
      * 获取书架列表

@@ -15,6 +15,8 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -332,6 +334,16 @@ class ReaderApplicationTests {
     }
 
     @Test
+    void getTxtTocRulesShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getTxtTocRules")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true))
+                .andExpect(jsonPath("$.data[0].name").exists())
+                .andExpect(jsonPath("$.data[0].rule").exists());
+    }
+
+    @Test
     void postDeleteLocalStoreFileShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/deleteLocalStoreFile")
                 .contentType(APPLICATION_JSON)
@@ -360,5 +372,19 @@ class ReaderApplicationTests {
                 .param("v", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void getCoverFromCacheShouldReturnBytes() throws Exception {
+        String rel = "e8/48/00/e848003a0308794061811c7817378d4e.jpg";
+        Path coverPath = Paths.get("storage", "cache", "cover", rel);
+        Files.createDirectories(coverPath.getParent());
+        byte[] bytes = "abc".getBytes();
+        Files.write(coverPath, bytes);
+
+        mockMvc.perform(get("/cover/" + rel))
+                .andExpect(status().isOk())
+                .andExpect(header().exists("Cache-Control"))
+                .andExpect(content().bytes(bytes));
     }
 }
