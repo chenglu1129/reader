@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -134,6 +135,46 @@ class ReaderApplicationTests {
         mockMvc.perform(post("/reader3/saveBookGroup")
                 .contentType(APPLICATION_JSON)
                 .content("{\"groupName\":\"测试分组\",\"show\":true}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postDeleteBookGroupShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteBookGroup")
+                .contentType(APPLICATION_JSON)
+                .content("{\"groupId\":1}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postSaveBookGroupIdShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/saveBookGroupId")
+                .contentType(APPLICATION_JSON)
+                .content("{\"bookUrl\":\"http://example.com/book\",\"groupId\":1}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void getCacheBookSSEShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/cacheBookSSE")
+                .param("url", "http://example.com/book")
+                .param("refresh", "0")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/event-stream"));
+    }
+
+    @Test
+    void postDeleteBookCacheShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteBookCache")
+                .contentType(APPLICATION_JSON)
+                .content("{\"bookUrl\":\"http://example.com/book\"}")
                 .param("v", "0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());

@@ -5,19 +5,31 @@ import com.google.gson.reflect.TypeToken;
 import com.htmake.reader.config.ReaderConfig;
 import com.htmake.reader.entity.Book;
 import com.htmake.reader.entity.BookChapter;
+import com.htmake.reader.entity.BookSource;
 import com.htmake.reader.entity.ReturnData;
 import com.htmake.reader.service.BookService;
+import com.htmake.reader.service.BookSourceService;
+import com.htmake.reader.service.WebBookService;
+import com.htmake.reader.utils.MD5Utils;
 import com.htmake.reader.utils.StorageHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.File;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 书籍管理Controller
@@ -37,6 +49,12 @@ public class BookController {
 
     @Autowired
     private StorageHelper storageHelper;
+
+    @Autowired
+    private BookSourceService bookSourceService;
+
+    @Autowired
+    private WebBookService webBookService;
 
     /**
      * 获取书架列表
@@ -300,6 +318,388 @@ public class BookController {
         }
     }
 
+    @PostMapping("/deleteBookGroup")
+    public ReturnData deleteBookGroup(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (body == null) {
+                return ReturnData.error("参数错误");
+            }
+
+            Object groupIdObj = body.get("groupId");
+            if (!(groupIdObj instanceof Number)) {
+                return ReturnData.error("参数错误");
+            }
+            int groupId = ((Number) groupIdObj).intValue();
+            if (groupId <= 0) {
+                return ReturnData.error("不能删除内置分组");
+            }
+
+            String groupPath = storageHelper.getUserDataPath(finalUser) + File.separator + "bookGroup.json";
+            String json = storageHelper.readFile(groupPath);
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            List<Map<String, Object>> groups = null;
+            if (json != null && !json.isEmpty()) {
+                groups = GSON.fromJson(json, listType);
+            }
+            if (groups == null) {
+                groups = new ArrayList<>();
+            }
+
+            int existIndex = -1;
+            for (int i = 0; i < groups.size(); i++) {
+                Map<String, Object> g = groups.get(i);
+                if (g == null) {
+                    continue;
+                }
+                Object gidObj = g.get("groupId");
+                if (gidObj instanceof Number && ((Number) gidObj).intValue() == groupId) {
+                    existIndex = i;
+                    break;
+                }
+            }
+            if (existIndex >= 0) {
+                groups.remove(existIndex);
+            }
+
+            boolean ok = storageHelper.writeFile(groupPath, GSON.toJson(groups));
+            if (!ok) {
+                return ReturnData.error("保存失败");
+            }
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("删除分组失败", e);
+            return ReturnData.error("删除分组失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/saveBookGroupId", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData saveBookGroupId(@RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "groupId", required = false) Integer groupId,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String finalBookUrl = bookUrl;
+            Integer finalGroupId = groupId;
+            if (body != null) {
+                if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                }
+                if (finalGroupId == null && body.get("groupId") instanceof Number) {
+                    finalGroupId = ((Number) body.get("groupId")).intValue();
+                }
+            }
+
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                return ReturnData.error("书籍链接不能为空");
+            }
+            if (finalGroupId == null || finalGroupId <= 0) {
+                return ReturnData.error("分组信息错误");
+            }
+
+            Book book = bookService.getShelfBookByURL(finalBookUrl, finalUser);
+            if (book == null) {
+                return ReturnData.error("书籍信息错误");
+            }
+
+            book.setGroup(finalGroupId);
+            boolean ok = bookService.saveBook(book, finalUser);
+            if (!ok) {
+                return ReturnData.error("保存失败");
+            }
+
+            return ReturnData.success(book);
+        } catch (Exception e) {
+            log.error("设置分组失败", e);
+            return ReturnData.error("设置分组失败: " + e.getMessage());
+        }
+    }
+
+    @GetMapping(value = "/cacheBookSSE", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter cacheBookSSE(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "refresh", defaultValue = "0") int refresh,
+            @RequestParam(value = "concurrentCount", defaultValue = "24") int concurrentCount,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        SseEmitter emitter = new SseEmitter(0L);
+        AtomicBoolean canceled = new AtomicBoolean(false);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        emitter.onCompletion(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onTimeout(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onError((e) -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+
+        executor.execute(() -> {
+            try {
+                if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                    ReturnData rd = new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                        : (username != null && !username.isEmpty()) ? username : null;
+                if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                    String[] parts = accessToken.split(":", 2);
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        finalUser = parts[0];
+                    }
+                }
+                if (finalUser == null || finalUser.isEmpty()) {
+                    finalUser = "default";
+                }
+                final String userName = finalUser;
+
+                String finalBookUrl = (url != null && !url.isEmpty()) ? url : bookUrl;
+                if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                    ReturnData rd = ReturnData.error("请输入书籍链接");
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    } catch (Exception ignore) {
+                    }
+                    emitter.complete();
+                    return;
+                }
+
+                Book bookInfo = bookService.getShelfBookByURL(finalBookUrl, userName);
+                if (bookInfo == null) {
+                    ReturnData rd = ReturnData.error("请先加入书架");
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    } catch (Exception ignore) {
+                    }
+                    emitter.complete();
+                    return;
+                }
+                if (bookInfo.isLocalBook() || "loc_book".equals(bookInfo.getOrigin())) {
+                    ReturnData rd = ReturnData.error("本地书籍无需缓存");
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    } catch (Exception ignore) {
+                    }
+                    emitter.complete();
+                    return;
+                }
+
+                BookSource bookSource = bookSourceService.getBookSourceByUrl(bookInfo.getOrigin(), userName);
+                if (bookSource == null) {
+                    ReturnData rd = ReturnData.error("未配置书源");
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    } catch (Exception ignore) {
+                    }
+                    emitter.complete();
+                    return;
+                }
+
+                List<BookChapter> chapterList = bookService.getChapterList(finalBookUrl, userName);
+                if (refresh > 0 || chapterList == null || chapterList.isEmpty()) {
+                    chapterList = webBookService.getChapterList(bookSource, bookInfo);
+                    if (chapterList != null && !chapterList.isEmpty()) {
+                        bookService.saveChapterList(finalBookUrl, chapterList, userName);
+                    }
+                }
+                if (chapterList == null) {
+                    chapterList = new ArrayList<>();
+                }
+                if (chapterList.isEmpty()) {
+                    ReturnData rd = ReturnData.error("章节列表为空");
+                    try {
+                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    } catch (Exception ignore) {
+                    }
+                    emitter.complete();
+                    return;
+                }
+
+                Set<Integer> cachedSet = java.util.Collections.synchronizedSet(new HashSet<>());
+                if (refresh <= 0) {
+                    String bookDir = storageHelper.getUserDataPath(userName) + File.separator + "shelf" + File.separator
+                            + MD5Utils.md5Encode16(finalBookUrl);
+                    File dir = new File(bookDir);
+                    File[] cached = dir.listFiles(f -> f != null && f.isFile() && f.getName().startsWith("content_")
+                            && f.getName().endsWith(".txt"));
+                    if (cached != null) {
+                        for (File f : cached) {
+                            try {
+                                String name = f.getName();
+                                String idx = name.substring("content_".length(), name.length() - ".txt".length());
+                                cachedSet.add(Integer.parseInt(idx));
+                            } catch (Exception ignore) {
+                            }
+                        }
+                    }
+                }
+
+                int effectiveConcurrent = concurrentCount > 0 ? concurrentCount : 24;
+                ExecutorService fetchPool = Executors.newFixedThreadPool(effectiveConcurrent);
+                AtomicInteger successCount = new AtomicInteger(0);
+                AtomicInteger failedCount = new AtomicInteger(0);
+                AtomicBoolean failed = new AtomicBoolean(false);
+                Object sendLock = new Object();
+
+                emitter.onCompletion(() -> {
+                    canceled.set(true);
+                    fetchPool.shutdownNow();
+                });
+                emitter.onTimeout(() -> {
+                    canceled.set(true);
+                    fetchPool.shutdownNow();
+                });
+                emitter.onError((e) -> {
+                    canceled.set(true);
+                    fetchPool.shutdownNow();
+                });
+
+                List<Runnable> tasks = new ArrayList<>();
+                for (int i = 0; i < chapterList.size(); i++) {
+                    int chapterIndex = i;
+                    if (refresh <= 0 && cachedSet.contains(chapterIndex)) {
+                        continue;
+                    }
+                    BookChapter chapter = chapterList.get(chapterIndex);
+                    tasks.add(() -> {
+                        if (canceled.get() || failed.get()) {
+                            return;
+                        }
+                        try {
+                            String content = webBookService.getChapterContent(bookSource, chapter);
+                            if (content == null || content.isEmpty()) {
+                                throw new RuntimeException("章节内容为空");
+                            }
+                            boolean ok = bookService.saveChapterContent(finalBookUrl, chapterIndex, content, userName);
+                            if (!ok) {
+                                throw new RuntimeException("写入缓存失败");
+                            }
+                            cachedSet.add(chapterIndex);
+                            int cachedCount = cachedSet.size();
+                            successCount.incrementAndGet();
+                            synchronized (sendLock) {
+                                if (!canceled.get()) {
+                                    try {
+                                        emitter.send(SseEmitter.event()
+                                                .data(GSON.toJson(Map.of("cachedCount", cachedCount)),
+                                                        MediaType.APPLICATION_JSON));
+                                    } catch (Exception ignore) {
+                                    }
+                                }
+                            }
+                        } catch (Exception e) {
+                            failed.set(true);
+                            failedCount.incrementAndGet();
+                            synchronized (sendLock) {
+                                if (!canceled.get()) {
+                                    ReturnData rd = ReturnData.error("缓存失败: " + e.getMessage());
+                                    try {
+                                        emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd),
+                                                MediaType.APPLICATION_JSON));
+                                    } catch (Exception ignore) {
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+
+                for (Runnable t : tasks) {
+                    if (canceled.get() || failed.get()) {
+                        break;
+                    }
+                    fetchPool.execute(t);
+                }
+                fetchPool.shutdown();
+                while (!fetchPool.isTerminated()) {
+                    if (canceled.get() || failed.get()) {
+                        fetchPool.shutdownNow();
+                        break;
+                    }
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+
+                if (canceled.get()) {
+                    emitter.complete();
+                    return;
+                }
+                if (failed.get()) {
+                    emitter.complete();
+                    return;
+                }
+
+                Map<String, Object> end = new HashMap<>();
+                end.put("cachedCount", cachedSet.size());
+                end.put("successCount", successCount.get());
+                end.put("failedCount", failedCount.get());
+                try {
+                    emitter.send(SseEmitter.event().name("end").data(GSON.toJson(end), MediaType.APPLICATION_JSON));
+                } catch (Exception ignore) {
+                }
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    ReturnData rd = ReturnData.error(e.getMessage() == null ? "缓存失败" : e.getMessage());
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                } catch (Exception ignore) {
+                }
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
     @PostMapping("/saveBookGroupOrder")
     public ReturnData saveBookGroupOrder(@RequestBody(required = false) Map<String, Object> body,
             @RequestParam(value = "accessToken", required = false) String accessToken,
@@ -448,6 +848,76 @@ public class BookController {
         } catch (Exception e) {
             log.error("获取书架缓存信息失败", e);
             return ReturnData.error("获取书架缓存信息失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/deleteBookCache", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData deleteBookCache(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String finalBookUrl = (url != null && !url.isEmpty()) ? url : bookUrl;
+            if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body != null) {
+                Object v = body.get("url");
+                if (v != null) {
+                    finalBookUrl = String.valueOf(v);
+                } else if (body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                }
+            }
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                return ReturnData.error("请输入书籍链接");
+            }
+
+            Book bookInfo = bookService.getShelfBookByURL(finalBookUrl, finalUser);
+            if (bookInfo == null) {
+                return ReturnData.error("请先加入书架");
+            }
+            if (bookInfo.isLocalBook() || "loc_book".equals(bookInfo.getOrigin())) {
+                return ReturnData.error("本地书籍无需删除缓存");
+            }
+
+            String bookDir = storageHelper.getUserDataPath(finalUser) + File.separator + "shelf" + File.separator
+                    + MD5Utils.md5Encode16(finalBookUrl);
+            File dir = new File(bookDir);
+            if (!dir.exists() || !dir.isDirectory()) {
+                return ReturnData.success("");
+            }
+
+            File[] cached = dir.listFiles(
+                    f -> f != null && f.isFile() && f.getName().startsWith("content_") && f.getName().endsWith(".txt"));
+            if (cached != null) {
+                for (File f : cached) {
+                    try {
+                        f.delete();
+                    } catch (Exception ignore) {
+                    }
+                }
+            }
+
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("删除书籍缓存失败", e);
+            return ReturnData.error("删除书籍缓存失败: " + e.getMessage());
         }
     }
 
