@@ -36,6 +36,33 @@ public class BookController {
         }
     }
 
+    @RequestMapping(value = "/getBookshelf", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getBookshelf(@RequestParam(value = "refresh", required = false) Integer refresh,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            Integer finalRefresh = refresh;
+            if (finalRefresh == null && body != null && body.get("refresh") != null) {
+                Object v = body.get("refresh");
+                if (v instanceof Number) {
+                    finalRefresh = ((Number) v).intValue();
+                } else {
+                    try {
+                        finalRefresh = Integer.parseInt(String.valueOf(v));
+                    } catch (Exception ignore) {
+                        finalRefresh = null;
+                    }
+                }
+            }
+
+            List<Book> bookList = bookService.getShelfBookList(username);
+            return ReturnData.success(bookList);
+        } catch (Exception e) {
+            log.error("获取书架列表失败", e);
+            return ReturnData.error("获取书架列表失败: " + e.getMessage());
+        }
+    }
+
     /**
      * 保存书籍到书架
      */
@@ -85,15 +112,32 @@ public class BookController {
     /**
      * 获取章节列表
      */
-    @GetMapping("/getChapterList")
-    public ReturnData getChapterList(@RequestParam("bookUrl") String bookUrl,
+    @RequestMapping(value = "/getChapterList", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getChapterList(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestBody(required = false) Map<String, Object> body,
             @RequestParam(value = "username", defaultValue = "default") String username) {
         try {
-            if (bookUrl == null || bookUrl.isEmpty()) {
-                return ReturnData.error("书籍URL不能为空");
+            String finalBookUrl = url != null && !url.isEmpty() ? url : bookUrl;
+            if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body != null) {
+                Object v = body.get("url");
+                if (v != null) {
+                    finalBookUrl = String.valueOf(v);
+                } else if (body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                } else if (body.get("book") instanceof Map<?, ?>) {
+                    Object inner = ((Map<?, ?>) body.get("book")).get("bookUrl");
+                    if (inner != null) {
+                        finalBookUrl = String.valueOf(inner);
+                    }
+                }
             }
 
-            List<BookChapter> chapterList = bookService.getChapterList(bookUrl, username);
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                return ReturnData.error("请输入书籍链接");
+            }
+
+            List<BookChapter> chapterList = bookService.getChapterList(finalBookUrl, username);
             return ReturnData.success(chapterList);
         } catch (Exception e) {
             log.error("获取章节列表失败", e);

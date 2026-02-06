@@ -6,6 +6,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -37,6 +38,25 @@ class ReaderApplicationTests {
     @Test
     void postGetInvalidBookSourcesShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/getInvalidBookSources")
+                .param("accessToken", "admin:dummy")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(true));
+    }
+
+    @Test
+    void postGetChapterListWithoutParamsShouldNotBe405() throws Exception {
+        mockMvc.perform(post("/reader3/getChapterList")
+                .param("accessToken", "admin:dummy")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").value(false));
+    }
+
+    @Test
+    void getBookshelfShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getBookshelf")
+                .param("refresh", "0")
                 .param("accessToken", "admin:dummy")
                 .param("v", "0"))
                 .andExpect(status().isOk())
