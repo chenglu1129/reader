@@ -7,8 +7,10 @@ import com.htmake.reader.entity.Book;
 import com.htmake.reader.entity.BookChapter;
 import com.htmake.reader.entity.BookSource;
 import com.htmake.reader.entity.ReturnData;
+import com.htmake.reader.entity.User;
 import com.htmake.reader.service.BookService;
 import com.htmake.reader.service.BookSourceService;
+import com.htmake.reader.service.UserService;
 import com.htmake.reader.service.WebBookService;
 import com.htmake.reader.utils.MD5Utils;
 import com.htmake.reader.utils.StorageHelper;
@@ -56,6 +58,9 @@ public class BookController {
 
     @Autowired
     private WebBookService webBookService;
+
+    @Autowired
+    private UserService userService;
 
     /**
      * 获取书架列表
@@ -675,6 +680,85 @@ public class BookController {
         } catch (Exception e) {
             log.error("导入书籍预览失败", e);
             return ReturnData.error("导入书籍预览失败: " + e.getMessage());
+        }
+    }
+
+    @RequestMapping(value = "/getLocalStoreFileList", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData getLocalStoreFileList(@RequestParam(value = "path", required = false) String path,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+                if (Boolean.FALSE.equals(user.getEnableLocalStore())) {
+                    return ReturnData.error("未开启本地书仓功能");
+                }
+            }
+
+            String finalPath = path;
+            if ((finalPath == null || finalPath.isEmpty()) && body != null && body.get("path") != null) {
+                finalPath = String.valueOf(body.get("path"));
+            }
+            if (finalPath == null || finalPath.isEmpty()) {
+                finalPath = "/";
+            }
+
+            String home = storageHelper.getLocalStorePath();
+            File file = new File(home + finalPath);
+            log.info("file: {} {}", finalPath, file);
+            if (!file.exists()) {
+                return ReturnData.error("路径不存在");
+            }
+            if (!file.isDirectory()) {
+                return ReturnData.error("路径不是目录");
+            }
+
+            List<Map<String, Object>> fileList = new ArrayList<>();
+            File[] files = file.listFiles();
+            if (files != null) {
+                for (File f : files) {
+                    if (f == null) {
+                        continue;
+                    }
+                    String name = f.getName();
+                    if (name != null && name.startsWith(".")) {
+                        continue;
+                    }
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("name", f.getName());
+                    item.put("size", f.length());
+                    item.put("path", f.toString().replace(home, ""));
+                    item.put("lastModified", f.lastModified());
+                    item.put("isDirectory", f.isDirectory());
+                    fileList.add(item);
+                }
+            }
+
+            return ReturnData.success(fileList);
+        } catch (Exception e) {
+            log.error("获取本地书仓文件列表失败", e);
+            return ReturnData.error("获取本地书仓文件列表失败: " + e.getMessage());
         }
     }
 

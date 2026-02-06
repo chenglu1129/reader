@@ -221,4 +221,13 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
     }
+
+    @Test
+    void getLocalStoreFileListShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/getLocalStoreFileList")
+                .param("path", "/")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }
