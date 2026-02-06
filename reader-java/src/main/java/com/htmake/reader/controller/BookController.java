@@ -36,25 +36,17 @@ public class BookController {
         }
     }
 
+    /**
+     * 获取书架列表（兼容原项目接口名：getBookshelf）
+     * <p>
+     * 前端可能以 GET query 或 POST body 传 refresh 参数；当前实现不依赖 refresh，仅为兼容保留。
+     */
     @RequestMapping(value = "/getBookshelf", method = { RequestMethod.GET, RequestMethod.POST })
     public ReturnData getBookshelf(@RequestParam(value = "refresh", required = false) Integer refresh,
             @RequestBody(required = false) Map<String, Object> body,
             @RequestParam(value = "username", defaultValue = "default") String username) {
         try {
-            Integer finalRefresh = refresh;
-            if (finalRefresh == null && body != null && body.get("refresh") != null) {
-                Object v = body.get("refresh");
-                if (v instanceof Number) {
-                    finalRefresh = ((Number) v).intValue();
-                } else {
-                    try {
-                        finalRefresh = Integer.parseInt(String.valueOf(v));
-                    } catch (Exception ignore) {
-                        finalRefresh = null;
-                    }
-                }
-            }
-
+            // refresh 参数仅用于兼容（不论是否传入，都返回当前书架列表）
             List<Book> bookList = bookService.getShelfBookList(username);
             return ReturnData.success(bookList);
         } catch (Exception e) {
@@ -163,6 +155,88 @@ public class BookController {
             } else {
                 return ReturnData.error("保存失败");
             }
+        } catch (Exception e) {
+            log.error("保存阅读进度失败", e);
+            return ReturnData.error("保存阅读进度失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 保存阅读进度（兼容原项目接口名：saveBookProgress）
+     * <p>
+     * 兼容参数命名：
+     * - 书籍链接：url / bookUrl / body.searchBook.bookUrl
+     * - 章节索引：index / chapterIndex
+     */
+    @RequestMapping(value = "/saveBookProgress", method = { RequestMethod.GET, RequestMethod.POST })
+    public ReturnData saveBookProgress(@RequestParam(value = "url", required = false) String url,
+            @RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestParam(value = "index", required = false) Integer index,
+            @RequestParam(value = "chapterIndex", required = false) Integer chapterIndex,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "username", defaultValue = "default") String username) {
+        try {
+            // 优先使用 query 参数（GET/POST 都可能带 query），其次再从 body 里兜底
+            String finalBookUrl = url != null && !url.isEmpty() ? url : bookUrl;
+            Integer finalIndex = index != null ? index : chapterIndex;
+
+            if ((finalBookUrl == null || finalBookUrl.isEmpty() || finalIndex == null) && body != null) {
+                if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                    // 兼容前端 body: { url, index } 以及部分场景 body: { searchBook: { bookUrl } }
+                    Object v = body.get("url");
+                    if (v != null) {
+                        finalBookUrl = String.valueOf(v);
+                    } else if (body.get("bookUrl") != null) {
+                        finalBookUrl = String.valueOf(body.get("bookUrl"));
+                    } else if (body.get("searchBook") instanceof Map<?, ?>) {
+                        Object inner = ((Map<?, ?>) body.get("searchBook")).get("bookUrl");
+                        if (inner != null) {
+                            finalBookUrl = String.valueOf(inner);
+                        }
+                    }
+                }
+
+                if (finalIndex == null && body.get("index") != null) {
+                    // 兼容 body.index 为 number 或字符串
+                    Object v = body.get("index");
+                    if (v instanceof Number) {
+                        finalIndex = ((Number) v).intValue();
+                    } else {
+                        try {
+                            finalIndex = Integer.parseInt(String.valueOf(v));
+                        } catch (Exception ignore) {
+                            finalIndex = null;
+                        }
+                    }
+                }
+                if (finalIndex == null && body.get("chapterIndex") != null) {
+                    // 兼容 body.chapterIndex 为 number 或字符串
+                    Object v = body.get("chapterIndex");
+                    if (v instanceof Number) {
+                        finalIndex = ((Number) v).intValue();
+                    } else {
+                        try {
+                            finalIndex = Integer.parseInt(String.valueOf(v));
+                        } catch (Exception ignore) {
+                            finalIndex = null;
+                        }
+                    }
+                }
+            }
+
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
+                return ReturnData.error("请输入书籍链接");
+            }
+            if (finalIndex == null || finalIndex < 0) {
+                return ReturnData.error("请输入章节索引");
+            }
+
+            // BookService.saveProgress 仅对“已在书架”的书生效；未加入书架则返回 false
+            boolean success = bookService.saveProgress(finalBookUrl, finalIndex, username);
+            if (success) {
+                return ReturnData.success("");
+            }
+            return ReturnData.error("书籍未加入书架");
         } catch (Exception e) {
             log.error("保存阅读进度失败", e);
             return ReturnData.error("保存阅读进度失败: " + e.getMessage());
