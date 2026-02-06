@@ -7,6 +7,7 @@ import com.htmake.reader.entity.Book;
 import com.htmake.reader.entity.BookChapter;
 import com.htmake.reader.entity.BookSource;
 import com.htmake.reader.entity.ReturnData;
+import com.htmake.reader.entity.SearchBook;
 import com.htmake.reader.entity.User;
 import com.htmake.reader.service.BookService;
 import com.htmake.reader.service.BookSourceService;
@@ -29,8 +30,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -1403,6 +1406,183 @@ public class BookController {
             } catch (Exception e) {
                 try {
                     ReturnData rd = ReturnData.error(e.getMessage() == null ? "缓存失败" : e.getMessage());
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                } catch (Exception ignore) {
+                }
+                emitter.complete();
+            }
+        });
+
+        return emitter;
+    }
+
+    @RequestMapping(value = "/searchBookMultiSSE", method = { RequestMethod.GET,
+            RequestMethod.POST }, produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter searchBookMultiSSE(@RequestParam(value = "key", required = false) String key,
+            @RequestParam(value = "bookSourceGroup", required = false) String bookSourceGroup,
+            @RequestParam(value = "lastIndex", required = false) Integer lastIndex,
+            @RequestParam(value = "searchSize", required = false) Integer searchSize,
+            @RequestParam(value = "concurrentCount", required = false) Integer concurrentCount,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        SseEmitter emitter = new SseEmitter(0L);
+        AtomicBoolean canceled = new AtomicBoolean(false);
+
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        emitter.onCompletion(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onTimeout(() -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+        emitter.onError((e) -> {
+            canceled.set(true);
+            executor.shutdownNow();
+        });
+
+        executor.execute(() -> {
+            try {
+                if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                    ReturnData rd = new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                        : (username != null && !username.isEmpty()) ? username : null;
+                if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                    String[] parts = accessToken.split(":", 2);
+                    if (parts.length >= 1 && !parts[0].isEmpty()) {
+                        finalUser = parts[0];
+                    }
+                }
+                if (finalUser == null || finalUser.isEmpty()) {
+                    finalUser = "default";
+                }
+
+                String finalKey = key;
+                String finalGroup = bookSourceGroup;
+                Integer finalLastIndex = lastIndex;
+                Integer finalSearchSize = searchSize;
+                Integer finalConcurrent = concurrentCount;
+                if (body != null) {
+                    if ((finalKey == null || finalKey.isEmpty()) && body.get("key") != null) {
+                        finalKey = String.valueOf(body.get("key"));
+                    }
+                    if (finalGroup == null && body.get("bookSourceGroup") != null) {
+                        finalGroup = String.valueOf(body.get("bookSourceGroup"));
+                    }
+                    if (finalLastIndex == null && body.get("lastIndex") instanceof Number) {
+                        finalLastIndex = ((Number) body.get("lastIndex")).intValue();
+                    }
+                    if (finalSearchSize == null && body.get("searchSize") instanceof Number) {
+                        finalSearchSize = ((Number) body.get("searchSize")).intValue();
+                    }
+                    if (finalConcurrent == null && body.get("concurrentCount") instanceof Number) {
+                        finalConcurrent = ((Number) body.get("concurrentCount")).intValue();
+                    }
+                }
+
+                int startIndex = finalLastIndex == null ? -1 : finalLastIndex;
+                int sizeLimit = finalSearchSize == null || finalSearchSize <= 0 ? 50 : finalSearchSize;
+                int concurrent = finalConcurrent == null || finalConcurrent <= 0 ? 24 : finalConcurrent;
+
+                final String searchKey = finalKey;
+                List<BookSource> sources = bookSourceService.getBookSourcesByGroup(finalGroup, finalUser);
+                if (sources == null || sources.isEmpty()) {
+                    ReturnData rd = ReturnData.error("未配置书源");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+                if (finalKey == null || finalKey.isEmpty()) {
+                    ReturnData rd = ReturnData.error("请输入搜索关键字");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+                if (startIndex >= sources.size() - 1) {
+                    ReturnData rd = ReturnData.error("没有更多了");
+                    emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
+                    emitter.complete();
+                    return;
+                }
+
+                List<SearchBook> resultList = new ArrayList<>();
+                Set<String> resultMap = new HashSet<>();
+                int currentIndex = startIndex;
+
+                while (!canceled.get() && currentIndex < sources.size() - 1 && resultList.size() < sizeLimit) {
+                    int batchStart = currentIndex + 1;
+                    int batchEnd = Math.min(batchStart + concurrent, sources.size());
+                    ExecutorService pool = Executors.newFixedThreadPool(Math.max(1, batchEnd - batchStart));
+                    List<Callable<List<SearchBook>>> tasks = new ArrayList<>();
+                    for (int i = batchStart; i < batchEnd; i++) {
+                        BookSource bookSource = sources.get(i);
+                        tasks.add(() -> {
+                            try {
+                                return webBookService.searchBook(bookSource, searchKey, 1);
+                            } catch (Exception e) {
+                                log.warn("搜索书源失败: {}", bookSource.getBookSourceName(), e);
+                                return new ArrayList<>();
+                            }
+                        });
+                    }
+
+                    List<Future<List<SearchBook>>> futures = new ArrayList<>();
+                    for (Callable<List<SearchBook>> task : tasks) {
+                        futures.add(pool.submit(task));
+                    }
+                    pool.shutdown();
+
+                    List<SearchBook> loopResult = new ArrayList<>();
+                    for (Future<List<SearchBook>> future : futures) {
+                        if (canceled.get()) {
+                            break;
+                        }
+                        List<SearchBook> books;
+                        try {
+                            books = future.get();
+                        } catch (Exception e) {
+                            continue;
+                        }
+                        if (books == null) {
+                            continue;
+                        }
+                        for (SearchBook book : books) {
+                            if (book == null) {
+                                continue;
+                            }
+                            String author = book.getAuthor() == null ? "" : book.getAuthor();
+                            String name = book.getName() == null ? "" : book.getName();
+                            String bookKey = name + "_" + author;
+                            if (!resultMap.contains(bookKey)) {
+                                resultMap.add(bookKey);
+                                resultList.add(book);
+                                loopResult.add(book);
+                            }
+                        }
+                    }
+
+                    currentIndex = batchEnd - 1;
+                    Map<String, Object> payload = new HashMap<>();
+                    payload.put("lastIndex", currentIndex);
+                    payload.put("data", loopResult);
+                    emitter.send(SseEmitter.event().name("message").data(GSON.toJson(payload), MediaType.APPLICATION_JSON));
+                }
+
+                Map<String, Object> end = new HashMap<>();
+                end.put("lastIndex", currentIndex);
+                emitter.send(SseEmitter.event().name("end").data(GSON.toJson(end), MediaType.APPLICATION_JSON));
+                emitter.complete();
+            } catch (Exception e) {
+                try {
+                    ReturnData rd = ReturnData.error(e.getMessage() == null ? "搜索失败" : e.getMessage());
                     emitter.send(SseEmitter.event().name("error").data(GSON.toJson(rd), MediaType.APPLICATION_JSON));
                 } catch (Exception ignore) {
                 }

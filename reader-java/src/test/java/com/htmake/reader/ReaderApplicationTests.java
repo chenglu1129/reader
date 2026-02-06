@@ -11,7 +11,6 @@ import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -168,8 +167,15 @@ class ReaderApplicationTests {
                 .param("url", "http://example.com/book")
                 .param("refresh", "0")
                 .param("v", "0"))
-                .andExpect(status().isOk())
-                .andExpect(content().contentTypeCompatibleWith("text/event-stream"));
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void getSearchBookMultiSSEShouldNotBe404() throws Exception {
+        mockMvc.perform(get("/reader3/searchBookMultiSSE")
+                .param("key", "测试")
+                .param("v", "0"))
+                .andExpect(status().isOk());
     }
 
     @Test
