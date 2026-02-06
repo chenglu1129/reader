@@ -118,4 +118,24 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
     }
+
+    @Test
+    void postSaveBookGroupOrderShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/saveBookGroupOrder")
+                .contentType(APPLICATION_JSON)
+                .content("{\"order\":[{\"groupId\":-1,\"order\":0},{\"groupId\":-2,\"order\":1},{\"groupId\":-3,\"order\":2},{\"groupId\":-4,\"order\":3}]}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
+    void postSaveBookGroupShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/saveBookGroup")
+                .contentType(APPLICATION_JSON)
+                .content("{\"groupName\":\"测试分组\",\"show\":true}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }

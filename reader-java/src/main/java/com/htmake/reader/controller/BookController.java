@@ -101,11 +101,13 @@ public class BookController {
             String groupPath = storageHelper.getUserDataPath(finalUser) + File.separator + "bookGroup.json";
             File groupFile = new File(groupPath);
             if (!groupFile.exists()) {
+                storageHelper.writeFile(groupPath, GSON.toJson(defaultGroups));
                 return ReturnData.success(defaultGroups);
             }
 
             String json = storageHelper.readFile(groupPath);
             if (json == null || json.isEmpty()) {
+                storageHelper.writeFile(groupPath, GSON.toJson(defaultGroups));
                 return ReturnData.success(defaultGroups);
             }
 
@@ -119,6 +121,286 @@ public class BookController {
         } catch (Exception e) {
             log.error("获取分组列表失败", e);
             return ReturnData.error("获取分组列表失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/saveBookGroup")
+    public ReturnData saveBookGroup(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (body == null) {
+                return ReturnData.error("参数错误");
+            }
+
+            String groupName = body.get("groupName") == null ? "" : String.valueOf(body.get("groupName"));
+            if (groupName == null || groupName.trim().isEmpty()) {
+                return ReturnData.error("分组名称不能为空");
+            }
+
+            int groupId = 0;
+            Object groupIdObj = body.get("groupId");
+            if (groupIdObj instanceof Number) {
+                groupId = ((Number) groupIdObj).intValue();
+            }
+
+            Integer inputOrder = null;
+            Object orderObj = body.get("order");
+            if (orderObj instanceof Number) {
+                inputOrder = ((Number) orderObj).intValue();
+            }
+
+            Boolean show = null;
+            Object showObj = body.get("show");
+            if (showObj instanceof Boolean) {
+                show = (Boolean) showObj;
+            } else if (showObj instanceof Number) {
+                show = ((Number) showObj).intValue() != 0;
+            } else if (showObj != null) {
+                String s = String.valueOf(showObj);
+                if ("true".equalsIgnoreCase(s) || "false".equalsIgnoreCase(s)) {
+                    show = Boolean.parseBoolean(s);
+                }
+            }
+            if (show == null) {
+                show = true;
+            }
+
+            List<Map<String, Object>> defaultGroups = new ArrayList<>();
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -1, "groupName", "全部", "order", -10, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -2, "groupName", "本地", "order", -9, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -3, "groupName", "音频", "order", -8, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -4, "groupName", "未分组", "order", -7, "show", true)));
+
+            String groupPath = storageHelper.getUserDataPath(finalUser) + File.separator + "bookGroup.json";
+            String json = storageHelper.readFile(groupPath);
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            List<Map<String, Object>> groups = null;
+            if (json != null && !json.isEmpty()) {
+                groups = GSON.fromJson(json, listType);
+            }
+            if (groups == null || groups.isEmpty()) {
+                groups = new ArrayList<>(defaultGroups);
+            } else {
+                Map<Integer, Map<String, Object>> byId = new HashMap<>();
+                for (Map<String, Object> g : groups) {
+                    if (g == null) {
+                        continue;
+                    }
+                    Object gidObj = g.get("groupId");
+                    if (gidObj instanceof Number) {
+                        byId.put(((Number) gidObj).intValue(), g);
+                    }
+                }
+                for (Map<String, Object> dg : defaultGroups) {
+                    Object gidObj = dg.get("groupId");
+                    if (gidObj instanceof Number) {
+                        int gid = ((Number) gidObj).intValue();
+                        if (!byId.containsKey(gid)) {
+                            groups.add(new HashMap<>(dg));
+                        }
+                    }
+                }
+            }
+
+            int existIndex = -1;
+            for (int i = 0; i < groups.size(); i++) {
+                Map<String, Object> g = groups.get(i);
+                if (g == null) {
+                    continue;
+                }
+                Object gidObj = g.get("groupId");
+                if (gidObj instanceof Number && ((Number) gidObj).intValue() == groupId) {
+                    existIndex = i;
+                    break;
+                }
+            }
+
+            Map<String, Object> bookGroup = new HashMap<>();
+            bookGroup.put("groupId", groupId);
+            bookGroup.put("groupName", groupName);
+            bookGroup.put("show", show);
+
+            if (inputOrder != null) {
+                bookGroup.put("order", inputOrder);
+            } else if (existIndex >= 0) {
+                Object oldOrder = groups.get(existIndex).get("order");
+                if (oldOrder instanceof Number) {
+                    bookGroup.put("order", ((Number) oldOrder).intValue());
+                } else if (oldOrder != null) {
+                    bookGroup.put("order", oldOrder);
+                }
+            }
+
+            if (existIndex >= 0) {
+                groups.set(existIndex, bookGroup);
+            } else {
+                if (groupId >= 0) {
+                    int usedMask = 0;
+                    int maxOrder = 0;
+                    for (Map<String, Object> g : groups) {
+                        if (g == null) {
+                            continue;
+                        }
+                        Object gidObj = g.get("groupId");
+                        if (gidObj instanceof Number) {
+                            int gid = ((Number) gidObj).intValue();
+                            if (gid > 0) {
+                                usedMask |= gid;
+                            }
+                        }
+                        Object oObj = g.get("order");
+                        if (oObj instanceof Number) {
+                            int o = ((Number) oObj).intValue();
+                            if (o > maxOrder) {
+                                maxOrder = o;
+                            }
+                        }
+                    }
+                    int newId = 1;
+                    while ((newId & usedMask) != 0) {
+                        newId <<= 1;
+                    }
+                    bookGroup.put("groupId", newId);
+                    if (!bookGroup.containsKey("order")) {
+                        bookGroup.put("order", maxOrder + 1);
+                    }
+                } else if (!bookGroup.containsKey("order")) {
+                    bookGroup.put("order", 0);
+                }
+                groups.add(bookGroup);
+            }
+
+            boolean ok = storageHelper.writeFile(groupPath, GSON.toJson(groups));
+            if (!ok) {
+                return ReturnData.error("保存失败");
+            }
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("保存分组失败", e);
+            return ReturnData.error("保存分组失败: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/saveBookGroupOrder")
+    public ReturnData saveBookGroupOrder(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            Object orderObj = body == null ? null : body.get("order");
+            if (!(orderObj instanceof List<?>)) {
+                return ReturnData.error("参数错误");
+            }
+
+            Map<Integer, Integer> orderMap = new HashMap<>();
+            for (Object item : (List<?>) orderObj) {
+                if (!(item instanceof Map<?, ?>)) {
+                    continue;
+                }
+                Map<?, ?> itemMap = (Map<?, ?>) item;
+                Object groupIdObj = itemMap.get("groupId");
+                Object orderValObj = itemMap.get("order");
+                if (!(groupIdObj instanceof Number) || !(orderValObj instanceof Number)) {
+                    continue;
+                }
+                orderMap.put(((Number) groupIdObj).intValue(), ((Number) orderValObj).intValue());
+            }
+
+            List<Map<String, Object>> defaultGroups = new ArrayList<>();
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -1, "groupName", "全部", "order", -10, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -2, "groupName", "本地", "order", -9, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -3, "groupName", "音频", "order", -8, "show", true)));
+            defaultGroups.add(new HashMap<>(Map.of("groupId", -4, "groupName", "未分组", "order", -7, "show", true)));
+
+            String groupPath = storageHelper.getUserDataPath(finalUser) + File.separator + "bookGroup.json";
+            String json = storageHelper.readFile(groupPath);
+            Type listType = new TypeToken<List<Map<String, Object>>>() {
+            }.getType();
+            List<Map<String, Object>> groups = null;
+            if (json != null && !json.isEmpty()) {
+                groups = GSON.fromJson(json, listType);
+            }
+            if (groups == null || groups.isEmpty()) {
+                groups = new ArrayList<>(defaultGroups);
+            } else {
+                Map<Integer, Map<String, Object>> byId = new HashMap<>();
+                for (Map<String, Object> g : groups) {
+                    if (g == null) {
+                        continue;
+                    }
+                    Object gidObj = g.get("groupId");
+                    if (gidObj instanceof Number) {
+                        byId.put(((Number) gidObj).intValue(), g);
+                    }
+                }
+                for (Map<String, Object> dg : defaultGroups) {
+                    Object gidObj = dg.get("groupId");
+                    if (gidObj instanceof Number) {
+                        int gid = ((Number) gidObj).intValue();
+                        if (!byId.containsKey(gid)) {
+                            groups.add(new HashMap<>(dg));
+                        }
+                    }
+                }
+            }
+
+            for (Map<String, Object> g : groups) {
+                if (g == null) {
+                    continue;
+                }
+                Object gidObj = g.get("groupId");
+                if (!(gidObj instanceof Number)) {
+                    continue;
+                }
+                int gid = ((Number) gidObj).intValue();
+                if (orderMap.containsKey(gid)) {
+                    g.put("order", orderMap.get(gid));
+                }
+            }
+
+            boolean ok = storageHelper.writeFile(groupPath, GSON.toJson(groups));
+            if (!ok) {
+                return ReturnData.error("保存失败");
+            }
+            return ReturnData.success("");
+        } catch (Exception e) {
+            log.error("保存分组排序失败", e);
+            return ReturnData.error("保存分组排序失败: " + e.getMessage());
         }
     }
 
