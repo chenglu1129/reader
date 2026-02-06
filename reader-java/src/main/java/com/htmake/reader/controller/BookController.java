@@ -762,6 +762,115 @@ public class BookController {
         }
     }
 
+    @PostMapping("/importFromLocalPathPreview")
+    public ReturnData importFromLocalPathPreview(@RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
+        try {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            if (body == null) {
+                return ReturnData.error("参数错误");
+            }
+            Object pathObj = body.get("path");
+            if (!(pathObj instanceof List<?>)) {
+                return ReturnData.error("参数错误");
+            }
+            boolean webdav = false;
+            Object webdavObj = body.get("webdav");
+            if (webdavObj instanceof Boolean) {
+                webdav = (Boolean) webdavObj;
+            } else if (webdavObj != null) {
+                webdav = Boolean.parseBoolean(String.valueOf(webdavObj));
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            if (Boolean.TRUE.equals(readerConfig.getSecure())) {
+                User user = userService.getUserByUsername(finalUser);
+                if (user == null) {
+                    return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+                }
+                if (webdav && Boolean.FALSE.equals(user.getEnableWebdav())) {
+                    return ReturnData.error("未开启 Webdav 功能");
+                } else if (!webdav && Boolean.FALSE.equals(user.getEnableLocalStore())) {
+                    return ReturnData.error("未开启本地书仓功能");
+                }
+            }
+
+            String home;
+            if (webdav) {
+                home = storageHelper.getUserDataPath(finalUser) + File.separator + "webdav";
+                File dir = new File(home);
+                if (!dir.exists()) {
+                    dir.mkdirs();
+                }
+            } else {
+                home = storageHelper.getLocalStorePath();
+            }
+
+            List<Map<String, Object>> fileList = new ArrayList<>();
+            List<?> paths = (List<?>) pathObj;
+            for (Object item : paths) {
+                if (item == null) {
+                    continue;
+                }
+                String path = String.valueOf(item);
+                if (path.isEmpty()) {
+                    continue;
+                }
+                String fullPath = home + path;
+                File file = new File(fullPath);
+                log.info("localFile: {} {}", fullPath, file);
+                if (!file.exists()) {
+                    continue;
+                }
+
+                String fileName = file.getName();
+                int dotIndex = fileName.lastIndexOf('.');
+                String ext = dotIndex >= 0 ? fileName.substring(dotIndex + 1).toLowerCase() : "";
+                if (!"txt".equals(ext) && !"epub".equals(ext) && !"umd".equals(ext) && !"cbz".equals(ext)) {
+                    return ReturnData.error("不支持导入" + ext + "格式的书籍文件");
+                }
+
+                String baseName = dotIndex > 0 ? fileName.substring(0, dotIndex) : fileName;
+                Book book = new Book();
+                book.setBookUrl(fullPath);
+                book.setOrigin("local");
+                book.setOriginName(fullPath);
+                book.setName(baseName);
+                book.setAuthor("");
+                book.setCanUpdate(false);
+                book.setType(0);
+                book.setRootDir(readerConfig.getWorkDir());
+                book.setUserNameSpace(finalUser);
+
+                Map<String, Object> result = new HashMap<>();
+                result.put("book", book);
+                result.put("chapters", new ArrayList<>());
+                fileList.add(result);
+            }
+
+            return ReturnData.success(fileList);
+        } catch (Exception e) {
+            log.error("本地导入预览失败", e);
+            return ReturnData.error("本地导入预览失败: " + e.getMessage());
+        }
+    }
+
     @RequestMapping(value = "/saveBookGroupId", method = { RequestMethod.GET, RequestMethod.POST })
     public ReturnData saveBookGroupId(@RequestParam(value = "bookUrl", required = false) String bookUrl,
             @RequestParam(value = "groupId", required = false) Integer groupId,

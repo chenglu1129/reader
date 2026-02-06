@@ -230,4 +230,14 @@ class ReaderApplicationTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isSuccess").exists());
     }
+
+    @Test
+    void postImportFromLocalPathPreviewShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/importFromLocalPathPreview")
+                .contentType(APPLICATION_JSON)
+                .content("{\"path\":[\"/\"],\"webdav\":false}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
 }
