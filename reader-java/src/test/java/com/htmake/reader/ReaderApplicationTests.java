@@ -152,6 +152,16 @@ class ReaderApplicationTests {
     }
 
     @Test
+    void postDeleteBookShouldNotBe404() throws Exception {
+        mockMvc.perform(post("/reader3/deleteBook")
+                .contentType(APPLICATION_JSON)
+                .content("{\"bookUrl\":\"http://example.com/book\"}")
+                .param("v", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isSuccess").exists());
+    }
+
+    @Test
     void postSaveBookGroupIdShouldNotBe404() throws Exception {
         mockMvc.perform(post("/reader3/saveBookGroupId")
                 .contentType(APPLICATION_JSON)

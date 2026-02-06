@@ -1841,14 +1841,61 @@ public class BookController {
      * 从书架删除书籍
      */
     @PostMapping("/deleteBook")
-    public ReturnData deleteBook(@RequestParam("bookUrl") String bookUrl,
-            @RequestParam(value = "username", defaultValue = "default") String username) {
+    public ReturnData deleteBook(@RequestParam(value = "bookUrl", required = false) String bookUrl,
+            @RequestBody(required = false) Map<String, Object> body,
+            @RequestParam(value = "accessToken", required = false) String accessToken,
+            @RequestParam(value = "username", required = false) String username,
+            @RequestParam(value = "userNS", required = false) String userNS) {
         try {
-            if (bookUrl == null || bookUrl.isEmpty()) {
+            if (Boolean.TRUE.equals(readerConfig.getSecure()) && (accessToken == null || accessToken.isEmpty())) {
+                return new ReturnData(false, "请登录后使用", "NEED_LOGIN");
+            }
+
+            String finalUser = (userNS != null && !userNS.isEmpty()) ? userNS
+                    : (username != null && !username.isEmpty()) ? username : null;
+            if ((finalUser == null || finalUser.isEmpty()) && accessToken != null && !accessToken.isEmpty()) {
+                String[] parts = accessToken.split(":", 2);
+                if (parts.length >= 1 && !parts[0].isEmpty()) {
+                    finalUser = parts[0];
+                }
+            }
+            if (finalUser == null || finalUser.isEmpty()) {
+                finalUser = "default";
+            }
+
+            String finalBookUrl = bookUrl;
+            String finalName = null;
+            String finalAuthor = null;
+            if (body != null) {
+                if ((finalBookUrl == null || finalBookUrl.isEmpty()) && body.get("bookUrl") != null) {
+                    finalBookUrl = String.valueOf(body.get("bookUrl"));
+                }
+                if (body.get("name") != null) {
+                    finalName = String.valueOf(body.get("name"));
+                }
+                if (body.get("author") != null) {
+                    finalAuthor = String.valueOf(body.get("author"));
+                }
+            }
+
+            if ((finalBookUrl == null || finalBookUrl.isEmpty()) && finalName != null && finalAuthor != null) {
+                List<Book> shelfBooks = bookService.getShelfBookList(finalUser);
+                for (Book shelfBook : shelfBooks) {
+                    if (shelfBook == null) {
+                        continue;
+                    }
+                    if (finalName.equals(shelfBook.getName()) && finalAuthor.equals(shelfBook.getAuthor())) {
+                        finalBookUrl = shelfBook.getBookUrl();
+                        break;
+                    }
+                }
+            }
+
+            if (finalBookUrl == null || finalBookUrl.isEmpty()) {
                 return ReturnData.error("书籍URL不能为空");
             }
 
-            boolean success = bookService.deleteBook(bookUrl, username);
+            boolean success = bookService.deleteBook(finalBookUrl, finalUser);
             if (success) {
                 return ReturnData.success("删除成功");
             } else {
